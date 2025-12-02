@@ -85,7 +85,7 @@ export class TimeTrackingService {
         tracking.endTime = endTime;
         tracking.durationMinutes = durationMinutes;
         tracking.isActive = false;
-        tracking.notes = stopDto.notes;
+        tracking.notes = stopDto.notes ?? '';
 
         // Award points based on duration
         const pointsEarned = Math.floor(durationMinutes / 30); // 1 point per 30 minutes

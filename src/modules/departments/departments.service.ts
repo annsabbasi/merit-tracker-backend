@@ -86,7 +86,7 @@ export class DepartmentsService {
         // Remove department from users
         await this.usersRepository.update(
             { departmentId: department.id },
-            { departmentId: null },
+            { departmentId: '' },
         );
 
         await this.departmentsRepository.remove(department);

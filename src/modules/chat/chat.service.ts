@@ -58,7 +58,7 @@ export class ChatService {
             const member = this.chatRoomMemberRepository.create({
                 chatRoomId: savedRoom.id,
                 userId,
-                isQcAdmin: user.role === UserRole.QC_ADMIN || user.role === UserRole.COMPANY_ADMIN,
+                isQcAdmin: user?.role === UserRole.QC_ADMIN || user?.role === UserRole.COMPANY_ADMIN,
             });
             await this.chatRoomMemberRepository.save(member);
         }
