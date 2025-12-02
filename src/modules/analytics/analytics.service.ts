@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { User } from '../../entities/user.entity';
-import { Project } from '../../entities/project.entity';
+import { Project, ProjectStatus } from '../../entities/project.entity';
 import { SubProject } from '../../entities/sub-project.entity';
 import { TimeTracking } from '../../entities/time-tracking.entity';
 import { Sop, SopStatus } from '../../entities/sop.entity';
@@ -39,7 +39,10 @@ export class AnalyticsService {
             this.usersRepository.count({ where: { companyId } }),
             this.usersRepository.count({ where: { companyId, isActive: true } }),
             this.projectsRepository.count({ where: { companyId } }),
-            this.projectsRepository.count({ where: { companyId, status: 'IN_PROGRESS' } }),
+            // this.projectsRepository.count({ where: { companyId, status: 'IN_PROGRESS' } }),
+            this.projectsRepository.count({
+                where: { companyId, status: ProjectStatus.IN_PROGRESS },
+            }),
             this.departmentsRepository.count({ where: { companyId } }),
             this.sopsRepository.count({ where: { companyId } }),
             this.sopsRepository.count({ where: { companyId, status: SopStatus.PENDING_APPROVAL } }),
