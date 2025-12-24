@@ -8,8 +8,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser, SkipSubscriptionCheck } from './guards';
 // import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
-@ApiTags('auth')
-@Controller('auth')
+@ApiTags('')
+@Controller('')
 export class AuthController {
     constructor(private readonly authService: AuthService) { }
 
