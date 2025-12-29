@@ -1,117 +1,122 @@
 // src/modules/projects/dto/projects.dto.ts
-import { IsString, IsOptional, IsUUID, IsArray, IsDateString, IsNotEmpty, IsEnum, IsNumber, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, IsUUID, IsNumber, IsBoolean, IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProjectStatus, ProjectMemberRole } from '@prisma/client';
-import { Type } from 'class-transformer';
 
 export class CreateProjectDto {
-    @ApiProperty({ example: 'Website Redesign' })
+    @ApiProperty({ description: 'Project name' })
     @IsString()
-    @IsNotEmpty()
+    @IsNotEmpty({ message: 'Project name is required' })
     name: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Project description' })
     @IsString()
+    @IsOptional()
     description?: string;
 
-    @ApiPropertyOptional({ example: 50000 })
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Project budget' })
     @IsNumber()
-    @Type(() => Number)
+    @IsOptional()
     budget?: number;
 
-    @ApiPropertyOptional({ enum: ProjectStatus })
-    @IsOptional()
+    @ApiPropertyOptional({ enum: ProjectStatus, default: ProjectStatus.PLANNING })
     @IsEnum(ProjectStatus)
+    @IsOptional()
     status?: ProjectStatus;
 
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Project lead user ID' })
     @IsUUID()
+    @IsOptional()
     projectLeadId?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Project start date' })
+    @IsString()
     @IsOptional()
-    @IsDateString()
     startDate?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Project end date' })
+    @IsString()
     @IsOptional()
-    @IsDateString()
     endDate?: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Enable screen monitoring' })
     @IsBoolean()
+    @IsOptional()
     screenMonitoringEnabled?: boolean;
 
-    @ApiPropertyOptional({ type: [String] })
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Initial member IDs' })
     @IsArray()
     @IsUUID('4', { each: true })
+    @IsOptional()
     memberIds?: string[];
+
+    // ============================================
+    // NEW: Required department ID - Project MUST belong to a department
+    // ============================================
+    @ApiProperty({ description: 'Department ID - Required. Every project must belong to a department.' })
+    @IsUUID()
+    @IsNotEmpty({ message: 'Department is required. Every project must be linked to a department.' })
+    departmentId: string;
 }
 
 export class UpdateProjectDto {
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Project name' })
     @IsString()
+    @IsOptional()
     name?: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Project description' })
     @IsString()
+    @IsOptional()
     description?: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Project budget' })
     @IsNumber()
-    @Type(() => Number)
+    @IsOptional()
     budget?: number;
 
     @ApiPropertyOptional({ enum: ProjectStatus })
-    @IsOptional()
     @IsEnum(ProjectStatus)
+    @IsOptional()
     status?: ProjectStatus;
 
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Project lead user ID' })
     @IsUUID()
+    @IsOptional()
     projectLeadId?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Project start date' })
+    @IsString()
     @IsOptional()
-    @IsDateString()
     startDate?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Project end date' })
+    @IsString()
     @IsOptional()
-    @IsDateString()
     endDate?: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Enable screen monitoring' })
     @IsBoolean()
+    @IsOptional()
     screenMonitoringEnabled?: boolean;
 }
 
 export class AddProjectMembersDto {
-    @ApiProperty({ type: [String] })
+    @ApiProperty({ description: 'User IDs to add' })
     @IsArray()
     @IsUUID('4', { each: true })
     userIds: string[];
 }
 
 export class RemoveProjectMembersDto {
-    @ApiProperty({ type: [String] })
+    @ApiProperty({ description: 'User IDs to remove' })
     @IsArray()
     @IsUUID('4', { each: true })
     userIds: string[];
 }
 
 export class UpdateMemberRoleDto {
-    @ApiProperty()
+    @ApiProperty({ description: 'User ID' })
     @IsUUID()
     userId: string;
 
@@ -122,12 +127,17 @@ export class UpdateMemberRoleDto {
 
 export class ProjectQueryDto {
     @ApiPropertyOptional({ enum: ProjectStatus })
-    @IsOptional()
     @IsEnum(ProjectStatus)
+    @IsOptional()
     status?: ProjectStatus;
 
-    @ApiPropertyOptional()
-    @IsOptional()
+    @ApiPropertyOptional({ description: 'Search term' })
     @IsString()
+    @IsOptional()
     search?: string;
+
+    @ApiPropertyOptional({ description: 'Filter by department ID' })
+    @IsUUID()
+    @IsOptional()
+    departmentId?: string;
 }

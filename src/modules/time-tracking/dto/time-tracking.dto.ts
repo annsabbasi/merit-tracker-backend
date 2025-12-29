@@ -85,4 +85,7 @@ export class ManualTimeEntryDto {
     @IsOptional()
     @IsString()
     notes?: string;
+
+    @IsString()
+    userId?: string
 }

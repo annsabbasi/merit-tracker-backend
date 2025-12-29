@@ -13,6 +13,7 @@ enum UserRole {
   USER
   QC_ADMIN
   COMPANY_ADMIN
+  SUPER_ADMIN
 }
 
 enum SubscriptionStatus {
@@ -108,38 +109,38 @@ model Company {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  password     String
-  firstName    String
-  lastName     String
-  role         UserRole  @default(USER)
-  avatar       String?
-  phone        String?
-  isActive     Boolean   @default(true)
-  companyId    String
-  departmentId String?
-  startDate    DateTime?
-  endDate      DateTime?
-  points       Int       @default(0)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  department          Department?      @relation(fields: [departmentId], references: [id])
-  projectMemberships  ProjectMember[]
-  timeTrackings       TimeTracking[]
-  sopsCreated         Sop[]            @relation("SopCreator")
-  sopsApproved        Sop[]            @relation("SopApprover")
-  notifications       Notification[]
-  chatRoomsCreated    ChatRoom[]
-  chatRoomMembers     ChatRoomMember[]
-  chatMessages        ChatMessage[]
-  subProjectsCreated  SubProject[]     @relation("SubProjectCreator")
-  subProjectsAssigned SubProject[]     @relation("SubProjectAssignee")
-  activityLogs        ActivityLog[]
-  departmentsLed      Department[]     @relation("DepartmentLead")
-  projectsLed         Project[]
+  id                         String              @id @default(uuid())
+  email                      String              @unique
+  password                   String
+  firstName                  String
+  lastName                   String
+  role                       UserRole            @default(USER)
+  avatar                     String?
+  phone                      String?
+  isActive                   Boolean             @default(true)
+  companyId                  String
+  departmentId               String?
+  startDate                  DateTime?
+  endDate                    DateTime?
+  points                     Int                 @default(0)
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+  company                    Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department                 Department?         @relation(fields: [departmentId], references: [id])
+  projectMemberships         ProjectMember[]
+  timeTrackings              TimeTracking[]
+  sopsCreated                Sop[]               @relation("SopCreator")
+  sopsApproved               Sop[]               @relation("SopApprover")
+  notifications              Notification[]
+  chatRoomsCreated           ChatRoom[]
+  chatRoomMembers            ChatRoomMember[]
+  chatMessages               ChatMessage[]
+  subProjectsCreated         SubProject[]        @relation("SubProjectCreator")
+  subProjectsAssigned        SubProject[]        @relation("SubProjectAssignee")
+  activityLogs               ActivityLog[]
+  departmentsLed             Department[]        @relation("DepartmentLead")
+  departmentProjectsAssigned DepartmentProject[] @relation("DepartmentProjectAssigner")
+  projectsLed                Project[]
 
   @@index([companyId])
   @@index([email])
@@ -150,20 +151,43 @@ model Department {
   id          String    @id @default(uuid())
   name        String
   description String?
-  tag         String?
+  tag         String? // Color tag for visual identification
   companyId   String
-  leadId      String?
+  leadId      String? // Department Head
   startDate   DateTime?
   endDate     DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  lead    User?   @relation("DepartmentLead", fields: [leadId], references: [id])
-  users   User[]
+  company  Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lead     User?               @relation("DepartmentLead", fields: [leadId], references: [id])
+  users    User[]
+  projects DepartmentProject[] // NEW: Link to projects
 
   @@index([companyId])
   @@map("departments")
+}
+
+// ============================================
+// NEW: DepartmentProject Junction Table
+// ============================================
+// Add this new model for many-to-many relationship
+
+model DepartmentProject {
+  id           String   @id @default(uuid())
+  departmentId String
+  projectId    String
+  assignedAt   DateTime @default(now())
+  assignedById String? // Who linked the project to department
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedBy User?      @relation("DepartmentProjectAssigner", fields: [assignedById], references: [id])
+
+  @@unique([departmentId, projectId])
+  @@index([departmentId])
+  @@index([projectId])
+  @@map("department_projects")
 }
 
 model Project {
@@ -180,11 +204,13 @@ model Project {
   createdAt               DateTime      @default(now())
   updatedAt               DateTime      @updatedAt
 
-  company     Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  projectLead User?           @relation(fields: [projectLeadId], references: [id])
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectLead User?               @relation(fields: [projectLeadId], references: [id])
   members     ProjectMember[]
   subProjects SubProject[]
   chatRooms   ChatRoom[]
+  // departmentProjects DepartmentProject[]
+  departments DepartmentProject[]
 
   @@index([companyId])
   @@map("projects")

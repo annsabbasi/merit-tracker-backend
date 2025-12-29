@@ -1,74 +1,118 @@
 // src/modules/departments/dto/departments.dto.ts
-import { IsString, IsOptional, IsUUID, IsArray, IsDateString, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsUUID, IsDateString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateDepartmentDto {
-    @ApiProperty({ example: 'Engineering' })
+    @ApiProperty({ description: 'Department name' })
     @IsString()
-    @IsNotEmpty()
     name: string;
 
-    @ApiPropertyOptional({ example: 'Software development team' })
+    @ApiPropertyOptional({ description: 'Department description' })
     @IsOptional()
     @IsString()
     description?: string;
 
-    @ApiPropertyOptional({ example: 'engineering' })
+    @ApiPropertyOptional({ description: 'Color tag (hex code) for visual identification' })
     @IsOptional()
     @IsString()
     tag?: string;
 
-    @ApiPropertyOptional({ description: 'UUID of the department lead' })
+    @ApiPropertyOptional({ description: 'Department head user ID' })
     @IsOptional()
     @IsUUID()
     leadId?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Department start date' })
     @IsOptional()
     @IsDateString()
     startDate?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Department end date' })
     @IsOptional()
     @IsDateString()
     endDate?: string;
+
+    @ApiPropertyOptional({ description: 'Initial member user IDs to add to department' })
+    @IsOptional()
+    @IsArray()
+    @IsUUID('4', { each: true })
+    memberIds?: string[];
+
+    @ApiPropertyOptional({ description: 'Project IDs to link to department' })
+    @IsOptional()
+    @IsArray()
+    @IsUUID('4', { each: true })
+    projectIds?: string[];
 }
 
 export class UpdateDepartmentDto {
-    @ApiPropertyOptional({ example: 'Engineering' })
+    @ApiPropertyOptional({ description: 'Department name' })
     @IsOptional()
     @IsString()
     name?: string;
 
-    @ApiPropertyOptional({ example: 'Software development team' })
+    @ApiPropertyOptional({ description: 'Department description' })
     @IsOptional()
     @IsString()
     description?: string;
 
-    @ApiPropertyOptional({ example: 'engineering' })
+    @ApiPropertyOptional({ description: 'Color tag (hex code)' })
     @IsOptional()
     @IsString()
     tag?: string;
 
-    @ApiPropertyOptional({ description: 'UUID of the department lead' })
+    @ApiPropertyOptional({ description: 'Department head user ID' })
     @IsOptional()
     @IsUUID()
     leadId?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Department start date' })
     @IsOptional()
     @IsDateString()
     startDate?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Department end date' })
     @IsOptional()
     @IsDateString()
     endDate?: string;
 }
 
 export class AssignUsersDto {
-    @ApiProperty({ type: [String], description: 'Array of user UUIDs to assign' })
+    @ApiProperty({ description: 'Array of user IDs to assign to department' })
     @IsArray()
     @IsUUID('4', { each: true })
     userIds: string[];
+}
+
+export class RemoveUsersDto {
+    @ApiProperty({ description: 'Array of user IDs to remove from department' })
+    @IsArray()
+    @IsUUID('4', { each: true })
+    userIds: string[];
+}
+
+export class LinkProjectsDto {
+    @ApiProperty({ description: 'Array of project IDs to link to department' })
+    @IsArray()
+    @IsUUID('4', { each: true })
+    projectIds: string[];
+}
+
+export class UnlinkProjectsDto {
+    @ApiProperty({ description: 'Array of project IDs to unlink from department' })
+    @IsArray()
+    @IsUUID('4', { each: true })
+    projectIds: string[];
+}
+
+export class DepartmentQueryDto {
+    @ApiPropertyOptional({ description: 'Search by name or description' })
+    @IsOptional()
+    @IsString()
+    search?: string;
+
+    @ApiPropertyOptional({ description: 'Filter by lead ID' })
+    @IsOptional()
+    @IsUUID()
+    leadId?: string;
 }
