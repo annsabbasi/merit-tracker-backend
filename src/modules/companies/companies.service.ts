@@ -27,7 +27,7 @@ export class CompaniesService {
     }
 
     async update(id: string, updateDto: UpdateCompanyDto, currentUserRole: UserRole) {
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can update company details');
         }
 

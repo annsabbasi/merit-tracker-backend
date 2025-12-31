@@ -25,7 +25,7 @@ export class DepartmentsController {
 
     @Post()
     @UseGuards(RolesGuard)
-    @Roles(UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.COMPANY)
     @ApiOperation({ summary: 'Create new department (Company Admin only)' })
     async create(
         @Body() createDto: CreateDepartmentDto,
@@ -83,7 +83,7 @@ export class DepartmentsController {
 
     @Put(':id')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.COMPANY)
     @ApiOperation({ summary: 'Update department (Company Admin only)' })
     async update(
         @Param('id') id: string,
@@ -97,7 +97,7 @@ export class DepartmentsController {
 
     @Patch(':id/assign-users')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.COMPANY)
     @ApiOperation({ summary: 'Assign users to department (Company Admin only)' })
     async assignUsers(
         @Param('id') id: string,
@@ -111,7 +111,7 @@ export class DepartmentsController {
 
     @Patch(':id/remove-users')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.COMPANY)
     @ApiOperation({ summary: 'Remove users from department (Company Admin only)' })
     async removeUsers(
         @Param('id') id: string,
@@ -125,7 +125,7 @@ export class DepartmentsController {
 
     @Patch(':id/link-projects')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.COMPANY)
     @ApiOperation({ summary: 'Link projects to department (Company Admin only)' })
     async linkProjects(
         @Param('id') id: string,
@@ -139,7 +139,7 @@ export class DepartmentsController {
 
     @Patch(':id/unlink-projects')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.COMPANY)
     @ApiOperation({ summary: 'Unlink projects from department (Company Admin only)' })
     async unlinkProjects(
         @Param('id') id: string,
@@ -153,7 +153,7 @@ export class DepartmentsController {
 
     @Delete(':id')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.COMPANY)
     @ApiOperation({ summary: 'Delete department (Company Admin only)' })
     async delete(
         @Param('id') id: string,

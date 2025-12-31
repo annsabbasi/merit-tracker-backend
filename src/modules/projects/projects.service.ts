@@ -577,7 +577,7 @@ export class ProjectsService {
     // DELETE PROJECT
     // ============================================
     async delete(id: string, currentUserRole: UserRole, companyId: string) {
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can delete projects');
         }
 
@@ -838,7 +838,7 @@ export class ProjectsService {
     // PERMISSION CHECK
     // ============================================
     private canManageProject(userRole: UserRole, userId: string, project: any): boolean {
-        if (userRole === UserRole.COMPANY_ADMIN || userRole === UserRole.QC_ADMIN) return true;
+        if (userRole === UserRole.COMPANY || userRole === UserRole.QC_ADMIN) return true;
         if (project.projectLeadId === userId) return true;
         const member = project.members?.find((m: any) => m.userId === userId);
         return member && member.role === ProjectMemberRole.QC_ADMIN;

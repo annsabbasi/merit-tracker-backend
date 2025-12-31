@@ -56,7 +56,7 @@ export class TimeTrackingService {
 
         const isMember = subProject.project.members.some((m) => m.userId === currentUserId);
         const isProjectLead = subProject.project.projectLeadId === currentUserId;
-        const isAdmin = currentUserRole === UserRole.COMPANY_ADMIN || currentUserRole === UserRole.QC_ADMIN;
+        const isAdmin = currentUserRole === UserRole.COMPANY || currentUserRole === UserRole.QC_ADMIN;
 
         if (!isMember && !isProjectLead && !isAdmin) {
             throw new ForbiddenException('You must be a member of this project');

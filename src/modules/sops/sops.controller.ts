@@ -180,7 +180,7 @@ export class SopsController {
     // ============================================
     @Get('pending')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.QC_ADMIN, UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.QC_ADMIN, UserRole.COMPANY)
     @ApiOperation({ summary: 'Get all pending SOPs' })
     async findPending(@CurrentUser('companyId') companyId: string) {
         return this.sopsService.findPendingApproval(companyId);
@@ -191,7 +191,7 @@ export class SopsController {
     // ============================================
     @Get('stats')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.QC_ADMIN, UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.QC_ADMIN, UserRole.COMPANY)
     @ApiOperation({ summary: 'Get SOP statistics' })
     async getStats(@CurrentUser('companyId') companyId: string) {
         return this.sopsService.getStats(companyId);
@@ -241,7 +241,7 @@ export class SopsController {
     // ============================================
     @Patch(':id/approve')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.QC_ADMIN, UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.QC_ADMIN, UserRole.COMPANY)
     @ApiOperation({ summary: 'Approve SOP' })
     async approve(
         @Param('id') id: string,
@@ -258,7 +258,7 @@ export class SopsController {
     // ============================================
     @Patch(':id/reject')
     @UseGuards(RolesGuard)
-    @Roles(UserRole.QC_ADMIN, UserRole.COMPANY_ADMIN)
+    @Roles(UserRole.QC_ADMIN, UserRole.COMPANY)
     @ApiOperation({ summary: 'Reject SOP' })
     async reject(
         @Param('id') id: string,

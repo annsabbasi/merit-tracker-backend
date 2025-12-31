@@ -70,7 +70,7 @@ export class ChatService {
 
     async deleteRoom(id: string, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         const room = await this.findRoom(id, companyId);
-        if (room.createdById !== currentUserId && currentUserRole !== UserRole.COMPANY_ADMIN) throw new ForbiddenException('Only room creator or company admin can delete');
+        if (room.createdById !== currentUserId && currentUserRole !== UserRole.COMPANY) throw new ForbiddenException('Only room creator or company admin can delete');
         await this.prisma.chatRoom.delete({ where: { id } });
         return { message: 'Chat room deleted' };
     }
@@ -111,7 +111,7 @@ export class ChatService {
     }
 
     private canManageRoom(userId: string, userRole: UserRole, room: any): boolean {
-        if (userRole === UserRole.COMPANY_ADMIN || userRole === UserRole.QC_ADMIN) return true;
+        if (userRole === UserRole.COMPANY || userRole === UserRole.QC_ADMIN) return true;
         if (room.createdById === userId) return true;
         const member = room.members?.find((m: any) => m.userId === userId);
         return member && member.isQcAdmin;

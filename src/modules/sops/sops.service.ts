@@ -86,7 +86,7 @@ export class SopsService {
         const admins = await this.prisma.user.findMany({
             where: {
                 companyId,
-                role: { in: [UserRole.COMPANY_ADMIN, UserRole.QC_ADMIN] },
+                role: { in: [UserRole.COMPANY, UserRole.QC_ADMIN] },
                 isActive: true,
                 id: { not: currentUserId }, // Don't notify creator
             },
@@ -313,7 +313,7 @@ export class SopsService {
             const admins = await this.prisma.user.findMany({
                 where: {
                     companyId,
-                    role: { in: [UserRole.COMPANY_ADMIN, UserRole.QC_ADMIN] },
+                    role: { in: [UserRole.COMPANY, UserRole.QC_ADMIN] },
                     isActive: true,
                 },
                 select: { id: true },

@@ -145,12 +145,12 @@ export class UsersService {
         const user = await this.findOne(id, currentUser.companyId);
 
         // Cannot change company admin role
-        if (user.role === UserRole.COMPANY_ADMIN) {
+        if (user.role === UserRole.COMPANY) {
             throw new ForbiddenException('Cannot change company admin role');
         }
 
-        // QC_ADMIN cannot promote to COMPANY_ADMIN
-        if (currentUser.role === UserRole.QC_ADMIN && updateDto.role === UserRole.COMPANY_ADMIN) {
+        // QC_ADMIN cannot promote to COMPANY
+        if (currentUser.role === UserRole.QC_ADMIN && updateDto.role === UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can promote to company admin role');
         }
 
@@ -207,7 +207,7 @@ export class UsersService {
     // ============================================
     async deactivate(id: string, currentUser: User): Promise<User> {
         // Only company admin can deactivate users
-        if (currentUser.role !== UserRole.COMPANY_ADMIN) {
+        if (currentUser.role !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can deactivate users');
         }
 
@@ -219,7 +219,7 @@ export class UsersService {
         }
 
         // Cannot deactivate company admin
-        if (user.role === UserRole.COMPANY_ADMIN) {
+        if (user.role === UserRole.COMPANY) {
             throw new ForbiddenException('Cannot deactivate company admin');
         }
 
@@ -289,7 +289,7 @@ export class UsersService {
     // ACTIVATE USER
     // ============================================
     async activate(id: string, currentUser: User): Promise<User> {
-        if (currentUser.role !== UserRole.COMPANY_ADMIN) {
+        if (currentUser.role !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can activate users');
         }
 
@@ -386,7 +386,7 @@ export class UsersService {
         const roleHierarchy: Record<UserRole, number> = {
             [UserRole.USER]: 1,
             [UserRole.QC_ADMIN]: 2,
-            [UserRole.COMPANY_ADMIN]: 3,
+            [UserRole.COMPANY]: 3,
             [UserRole.SUPER_ADMIN]: 4,
         };
 

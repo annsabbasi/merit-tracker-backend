@@ -17,10 +17,10 @@ import { CurrentUser, Roles } from '../auth/guards';
 export class NotificationsController {
     constructor(private readonly notificationsService: NotificationsService) { }
 
-    @Post() @UseGuards(RolesGuard) @Roles(UserRole.QC_ADMIN, UserRole.COMPANY_ADMIN) @ApiOperation({ summary: 'Create a notification (admin only)' })
+    @Post() @UseGuards(RolesGuard) @Roles(UserRole.QC_ADMIN, UserRole.COMPANY) @ApiOperation({ summary: 'Create a notification (admin only)' })
     async create(@Body() dto: CreateNotificationDto, @CurrentUser('role') role: string) { return this.notificationsService.create(dto, role as any); }
 
-    @Post('bulk') @UseGuards(RolesGuard) @Roles(UserRole.QC_ADMIN, UserRole.COMPANY_ADMIN) @ApiOperation({ summary: 'Create notifications for multiple users (admin only)' })
+    @Post('bulk') @UseGuards(RolesGuard) @Roles(UserRole.QC_ADMIN, UserRole.COMPANY) @ApiOperation({ summary: 'Create notifications for multiple users (admin only)' })
     async createBulk(@Body() dto: BulkNotificationDto, @CurrentUser('role') role: string) { return this.notificationsService.createBulk(dto, role as any); }
 
     @Get() @ApiOperation({ summary: 'Get all notifications for current user' })

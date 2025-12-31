@@ -109,7 +109,7 @@ export class AuthService {
                     password: hashedPassword,
                     firstName: registerDto.firstName,
                     lastName: registerDto.lastName,
-                    role: UserRole.COMPANY_ADMIN,
+                    role: UserRole.COMPANY,
                     companyId: company.id,
                     isActive: true,
                     phone: registerDto.phone,

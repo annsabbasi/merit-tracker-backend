@@ -27,11 +27,11 @@ export class DepartmentsService {
 
     /**
      * Create a new department
-     * Only COMPANY_ADMIN can create departments
+     * Only COMPANY can create departments
      */
     async create(createDto: CreateDepartmentDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         // Only company admin can create departments
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can create departments');
         }
 
@@ -390,10 +390,10 @@ export class DepartmentsService {
 
     /**
      * Update department
-     * Only COMPANY_ADMIN can update
+     * Only COMPANY can update
      */
     async update(id: string, updateDto: UpdateDepartmentDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can update departments');
         }
 
@@ -450,7 +450,7 @@ export class DepartmentsService {
      * Assign users to department
      */
     async assignUsers(id: string, dto: AssignUsersDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can assign users to departments');
         }
 
@@ -488,7 +488,7 @@ export class DepartmentsService {
      * Remove users from department
      */
     async removeUsers(id: string, dto: RemoveUsersDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can remove users from departments');
         }
 
@@ -516,7 +516,7 @@ export class DepartmentsService {
      * Link projects to department
      */
     async linkProjects(id: string, dto: LinkProjectsDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can link projects to departments');
         }
 
@@ -547,7 +547,7 @@ export class DepartmentsService {
      * Unlink projects from department
      */
     async unlinkProjects(id: string, dto: UnlinkProjectsDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can unlink projects from departments');
         }
 
@@ -638,10 +638,10 @@ export class DepartmentsService {
 
     /**
      * Delete department
-     * Only COMPANY_ADMIN can delete
+     * Only COMPANY can delete
      */
     async delete(id: string, currentUserRole: UserRole, companyId: string) {
-        if (currentUserRole !== UserRole.COMPANY_ADMIN) {
+        if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can delete departments');
         }
 

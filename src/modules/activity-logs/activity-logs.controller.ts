@@ -18,10 +18,10 @@ import { CurrentUser, Roles } from '../auth/guards';
 export class ActivityLogsController {
     constructor(private readonly activityLogsService: ActivityLogsService) { }
 
-    @Get() @UseGuards(RolesGuard) @Roles(UserRole.QC_ADMIN, UserRole.COMPANY_ADMIN) @ApiOperation({ summary: 'Get activity logs (admin only)' })
+    @Get() @UseGuards(RolesGuard) @Roles(UserRole.QC_ADMIN, UserRole.COMPANY) @ApiOperation({ summary: 'Get activity logs (admin only)' })
     async findAll(@CurrentUser('companyId') companyId: string, @Query() query: ActivityLogQueryDto, @CurrentUser('role') role: string) { return this.activityLogsService.findAll(companyId, query, role as any); }
 
-    @Get('stats') @UseGuards(RolesGuard) @Roles(UserRole.QC_ADMIN, UserRole.COMPANY_ADMIN) @ApiOperation({ summary: 'Get activity statistics (admin only)' })
+    @Get('stats') @UseGuards(RolesGuard) @Roles(UserRole.QC_ADMIN, UserRole.COMPANY) @ApiOperation({ summary: 'Get activity statistics (admin only)' })
     async getStats(@CurrentUser('companyId') companyId: string, @CurrentUser('role') role: string) { return this.activityLogsService.getStats(companyId, role as any); }
 
     @Get('user/:userId') @ApiOperation({ summary: 'Get activity logs for a specific user' })
