@@ -62,12 +62,14 @@ export class ProjectsService {
     }
 
     // ============================================
-    // CREATE PROJECT - Now requires departmentId
+    // CREATE PROJECT - ONLY COMPANY ADMIN CAN CREATE
     // ============================================
     async create(createDto: CreateProjectDto, currentUserRole: UserRole, currentUserId: string, companyId: string) {
-        // Only admins can create projects
-        if (currentUserRole === UserRole.USER) {
-            throw new ForbiddenException('Insufficient permissions to create projects');
+        // ============================================
+        // RESTRICTION: Only COMPANY role can create projects
+        // ============================================
+        if (currentUserRole !== UserRole.COMPANY) {
+            throw new ForbiddenException('Only company administrators can create projects. Please contact your company admin.');
         }
 
         const { memberIds, startDate, endDate, departmentId, ...restProjectData } = createDto;
@@ -383,6 +385,20 @@ export class ProjectsService {
                                 lastName: true,
                             },
                         },
+                        qcHead: {
+                            select: {
+                                id: true,
+                                firstName: true,
+                                lastName: true,
+                                avatar: true,
+                            },
+                        },
+                        _count: {
+                            select: {
+                                members: true,
+                                tasks: true,
+                            },
+                        },
                     },
                     orderBy: { createdAt: 'desc' },
                 },
@@ -448,13 +464,14 @@ export class ProjectsService {
     }
 
     // ============================================
-    // UPDATE PROJECT
+    // UPDATE PROJECT - Only COMPANY or Project Lead
     // ============================================
     async update(id: string, updateDto: UpdateProjectDto, currentUserRole: UserRole, currentUserId: string, companyId: string) {
         const project = await this.findOne(id, companyId);
 
-        if (!this.canManageProject(currentUserRole, currentUserId, project)) {
-            throw new ForbiddenException('Insufficient permissions');
+        // Only COMPANY admin or Project Lead can update
+        if (currentUserRole !== UserRole.COMPANY && project.projectLeadId !== currentUserId) {
+            throw new ForbiddenException('Only company administrators or project leads can update projects');
         }
 
         const { startDate, endDate, ...restUpdateData } = updateDto;
@@ -574,11 +591,11 @@ export class ProjectsService {
     }
 
     // ============================================
-    // DELETE PROJECT
+    // DELETE PROJECT - Only COMPANY admin
     // ============================================
     async delete(id: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
-            throw new ForbiddenException('Only company admin can delete projects');
+            throw new ForbiddenException('Only company administrators can delete projects');
         }
 
         const project = await this.findOne(id, companyId);
@@ -604,13 +621,14 @@ export class ProjectsService {
     }
 
     // ============================================
-    // ADD MEMBERS
+    // ADD MEMBERS - COMPANY or Project Lead only
     // ============================================
     async addMembers(id: string, dto: AddProjectMembersDto, currentUserRole: UserRole, currentUserId: string, companyId: string) {
         const project = await this.findOne(id, companyId);
 
-        if (!this.canManageProject(currentUserRole, currentUserId, project)) {
-            throw new ForbiddenException('Insufficient permissions');
+        // Only COMPANY admin or Project Lead can add members
+        if (currentUserRole !== UserRole.COMPANY && project.projectLeadId !== currentUserId) {
+            throw new ForbiddenException('Only company administrators or project leads can add members');
         }
 
         const users = await this.prisma.user.findMany({
@@ -657,13 +675,14 @@ export class ProjectsService {
     }
 
     // ============================================
-    // REMOVE MEMBERS
+    // REMOVE MEMBERS - COMPANY or Project Lead only
     // ============================================
     async removeMembers(id: string, dto: RemoveProjectMembersDto, currentUserRole: UserRole, currentUserId: string, companyId: string) {
         const project = await this.findOne(id, companyId);
 
-        if (!this.canManageProject(currentUserRole, currentUserId, project)) {
-            throw new ForbiddenException('Insufficient permissions');
+        // Only COMPANY admin or Project Lead can remove members
+        if (currentUserRole !== UserRole.COMPANY && project.projectLeadId !== currentUserId) {
+            throw new ForbiddenException('Only company administrators or project leads can remove members');
         }
 
         if (project.projectLeadId && dto.userIds.includes(project.projectLeadId)) {
@@ -691,13 +710,14 @@ export class ProjectsService {
     }
 
     // ============================================
-    // UPDATE MEMBER ROLE
+    // UPDATE MEMBER ROLE - COMPANY or Project Lead only
     // ============================================
     async updateMemberRole(id: string, dto: UpdateMemberRoleDto, currentUserRole: UserRole, currentUserId: string, companyId: string) {
         const project = await this.findOne(id, companyId);
 
-        if (!this.canManageProject(currentUserRole, currentUserId, project)) {
-            throw new ForbiddenException('Insufficient permissions');
+        // Only COMPANY admin or Project Lead can update roles
+        if (currentUserRole !== UserRole.COMPANY && project.projectLeadId !== currentUserId) {
+            throw new ForbiddenException('Only company administrators or project leads can update member roles');
         }
 
         const member = await this.prisma.projectMember.findUnique({
@@ -832,15 +852,5 @@ export class ProjectsService {
             totalTimeTrackedMinutes,
             totalTimeTrackedHours,
         };
-    }
-
-    // ============================================
-    // PERMISSION CHECK
-    // ============================================
-    private canManageProject(userRole: UserRole, userId: string, project: any): boolean {
-        if (userRole === UserRole.COMPANY || userRole === UserRole.QC_ADMIN) return true;
-        if (project.projectLeadId === userId) return true;
-        const member = project.members?.find((m: any) => m.userId === userId);
-        return member && member.role === ProjectMemberRole.QC_ADMIN;
     }
 }

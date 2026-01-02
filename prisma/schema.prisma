@@ -8,24 +8,26 @@ datasource db {
 }
 
 model Company {
-  id                 String             @id @default(uuid())
-  name               String             @unique
-  companyCode        String             @unique
-  logo               String?
-  address            String?
-  phone              String?
-  website            String?
-  subscriptionStatus SubscriptionStatus @default(TRIAL)
-  trialEndsAt        DateTime?
-  subscriptionEndsAt DateTime?
-  isActive           Boolean            @default(true)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  activityLogs       ActivityLog[]
-  departments        Department[]
-  projects           Project[]
-  sops               Sop[]
-  users              User[]
+  id                   String             @id @default(uuid())
+  name                 String             @unique
+  companyCode          String             @unique
+  logo                 String?
+  address              String?
+  phone                String?
+  website              String?
+  subscriptionStatus   SubscriptionStatus @default(TRIAL)
+  trialEndsAt          DateTime?
+  subscriptionEndsAt   DateTime?
+  isActive             Boolean            @default(true)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  activityLogs         ActivityLog[]
+  departments          Department[]
+  projects             Project[]
+  sops                 Sop[]
+  users                User[]
+  // Screen capture settings at company level
+  screenCaptureEnabled Boolean            @default(true) // Master toggle for company
 
   @@map("companies")
 }
@@ -60,9 +62,25 @@ model User {
   sopsCreated                Sop[]               @relation("SopCreator")
   subProjectsAssigned        SubProject[]        @relation("SubProjectAssignee")
   subProjectsCreated         SubProject[]        @relation("SubProjectCreator")
+  // NEW: SubProject QC Head relation
+  subProjectsAsQcHead        SubProject[]        @relation("SubProjectQcHead")
+  // NEW: SubProject member relation
+  subProjectMemberships      SubProjectMember[]
+  // NEW: Task assignments
+  tasksAssigned              Task[]              @relation("TaskAssignee")
+  tasksCreated               Task[]              @relation("TaskCreator")
   timeTrackings              TimeTracking[]
   company                    Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   department                 Department?         @relation(fields: [departmentId], references: [id])
+  // Desktop agent tracking
+  desktopAgents              DesktopAgent[]
+  // NEW: User performance stats (denormalized for fast queries)
+  totalTasksCompleted        Int                 @default(0)
+  totalTimeTrackedMinutes    Int                 @default(0)
+  totalPointsEarned          Int                 @default(0)
+  currentStreak              Int                 @default(0) // Days in a row with completed tasks
+  longestStreak              Int                 @default(0)
+  lastActiveDate             DateTime?
 
   @@index([companyId])
   @@index([email])
@@ -115,7 +133,10 @@ model Project {
   projectLeadId           String?
   startDate               DateTime?
   endDate                 DateTime?
-  screenMonitoringEnabled Boolean             @default(false)
+  // Screen capture settings - THIS IS THE KEY FIELD
+  screenCaptureEnabled    Boolean             @default(false)
+  screenCaptureInterval   Int                 @default(3) // Base interval in minutes (actual will be random 2-5)
+  screenMonitoringEnabled Boolean             @default(false) // Legacy field, keeping for compatibility
   createdAt               DateTime            @default(now())
   updatedAt               DateTime            @updatedAt
   chatRooms               ChatRoom[]
@@ -145,48 +166,264 @@ model ProjectMember {
   @@map("project_members")
 }
 
+// ENHANCED: SubProject now has QC Head and members
 model SubProject {
-  id             String           @id @default(uuid())
+  id             String             @id @default(uuid())
   title          String
   description    String?
   projectId      String
-  assignedToId   String?
+  assignedToId   String? // Legacy - kept for backward compatibility
   createdById    String
-  status         SubProjectStatus @default(TODO)
-  pointsValue    Int              @default(0)
+  // NEW: QC Head for this subproject (must be QC_ADMIN role)
+  qcHeadId       String?
+  status         SubProjectStatus   @default(TODO)
+  priority       Priority           @default(MEDIUM)
+  pointsValue    Int                @default(0)
   estimatedHours Int?
+  actualHours    Int? // Calculated from time tracking
   dueDate        DateTime?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  assignedTo     User?            @relation("SubProjectAssignee", fields: [assignedToId], references: [id])
-  createdBy      User             @relation("SubProjectCreator", fields: [createdById], references: [id])
-  project        Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  completedAt    DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  // Relations
+  assignedTo     User?              @relation("SubProjectAssignee", fields: [assignedToId], references: [id])
+  createdBy      User               @relation("SubProjectCreator", fields: [createdById], references: [id])
+  qcHead         User?              @relation("SubProjectQcHead", fields: [qcHeadId], references: [id])
+  project        Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // NEW: SubProject members (anyone in company can be added)
+  members        SubProjectMember[]
+  // NEW: Tasks within subproject
+  tasks          Task[]
   timeTrackings  TimeTracking[]
+  // Performance tracking
+  totalTimeSpent Int                @default(0) // Minutes - denormalized for fast queries
 
   @@index([projectId])
   @@index([assignedToId])
+  @@index([qcHeadId])
+  @@index([status])
   @@map("sub_projects")
 }
 
-model TimeTracking {
-  id              String     @id @default(uuid())
+// NEW: SubProject members junction table
+model SubProjectMember {
+  id               String               @id @default(uuid())
+  subProjectId     String
+  userId           String
+  role             SubProjectMemberRole @default(MEMBER)
+  joinedAt         DateTime             @default(now())
+  // Performance tracking per member per subproject
+  tasksCompleted   Int                  @default(0)
+  totalTimeMinutes Int                  @default(0)
+  pointsEarned     Int                  @default(0)
+  // Relations
+  subProject       SubProject           @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([subProjectId, userId])
+  @@index([subProjectId])
+  @@index([userId])
+  @@map("sub_project_members")
+}
+
+// NEW: Task model - granular tasks within SubProjects
+model Task {
+  id               String             @id @default(uuid())
+  title            String
+  description      String?
+  subProjectId     String
+  assignedToId     String?
+  createdById      String
+  status           TaskStatus         @default(TODO)
+  priority         Priority           @default(MEDIUM)
+  pointsValue      Int                @default(10) // Default points for completing task
+  estimatedMinutes Int?
+  actualMinutes    Int? // Calculated from time tracking
+  dueDate          DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  // Relations
+  subProject       SubProject         @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
+  assignedTo       User?              @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  createdBy        User               @relation("TaskCreator", fields: [createdById], references: [id])
+  timeTrackings    TaskTimeTracking[]
+
+  @@index([subProjectId])
+  @@index([assignedToId])
+  @@index([status])
+  @@map("tasks")
+}
+
+// NEW: Task-level time tracking
+model TaskTimeTracking {
+  id              String    @id @default(uuid())
+  taskId          String
   userId          String
-  subProjectId    String
   startTime       DateTime
   endTime         DateTime?
-  durationMinutes Int        @default(0)
+  durationMinutes Int       @default(0)
   notes           String?
-  screenshots     String[]
-  isActive        Boolean    @default(false)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  subProject      SubProject @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
-  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isActive        Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  task            Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+  @@index([isActive])
+  @@map("task_time_trackings")
+}
+
+model TimeTracking {
+  id                    String       @id @default(uuid())
+  userId                String
+  subProjectId          String
+  startTime             DateTime
+  endTime               DateTime?
+  durationMinutes       Int          @default(0)
+  notes                 String?
+  screenshots           String[] // Legacy field - keeping for compatibility
+  isActive              Boolean      @default(false)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  subProject            SubProject   @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // New relation to Screenshot model
+  screenCaptures        Screenshot[]
+  // Track time deductions from deleted screenshots
+  timeDeducted          Int          @default(0) // Total minutes deducted from deleted screenshots
+  // Track if screen capture is required for this session
+  screenCaptureRequired Boolean      @default(false)
 
   @@index([userId])
   @@index([subProjectId])
   @@index([isActive])
   @@map("time_trackings")
+}
+
+// NEW MODEL: Screenshot captures
+model Screenshot {
+  id              String        @id @default(uuid())
+  timeTrackingId  String
+  userId          String
+  filePath        String // Path in Supabase storage
+  fileUrl         String // Public URL
+  fileSize        Int // Size in bytes
+  capturedAt      DateTime // When the screenshot was taken
+  uploadedAt      DateTime      @default(now())
+  // Interval tracking for time deduction
+  intervalStart   DateTime // Start of interval this screenshot represents
+  intervalEnd     DateTime // End of interval (next screenshot's start or current time)
+  intervalMinutes Int // Minutes this screenshot covers
+  // Metadata
+  screenWidth     Int?
+  screenHeight    Int?
+  monitorIndex    Int           @default(0) // Which monitor (0 = primary)
+  // Verification
+  checksum        String? // SHA-256 hash for tampering detection
+  captureStatus   CaptureStatus @default(SUCCESS)
+  // Soft delete for audit trail
+  isDeleted       Boolean       @default(false)
+  deletedAt       DateTime?
+  deletedBy       String? // User who deleted (could be admin)
+  deletionReason  String?
+  // Auto-cleanup tracking
+  expiresAt       DateTime // Auto-delete after 60 days
+  timeTracking    TimeTracking  @relation(fields: [timeTrackingId], references: [id], onDelete: Cascade)
+
+  @@index([timeTrackingId])
+  @@index([userId])
+  @@index([capturedAt])
+  @@index([expiresAt])
+  @@index([isDeleted])
+  @@map("screenshots")
+}
+
+// NEW MODEL: Desktop Agent tracking
+model DesktopAgent {
+  id                 String    @id @default(uuid())
+  userId             String
+  machineId          String // Unique identifier for user's machine
+  machineName        String? // Computer name
+  platform           Platform // WINDOWS, MAC, LINUX
+  agentVersion       String // Version of installed agent
+  lastHeartbeat      DateTime? // Last time agent pinged server
+  lastActiveAt       DateTime? // Last activity detected
+  isOnline           Boolean   @default(false)
+  isActive           Boolean   @default(true) // Can be disabled by admin
+  installDate        DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  // Agent configuration
+  captureQuality     Int       @default(70) // JPEG quality 1-100
+  captureAllMonitors Boolean   @default(false)
+  // Authentication
+  agentToken         String    @unique // Token for agent API calls
+  tokenExpiresAt     DateTime
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, machineId])
+  @@index([userId])
+  @@index([agentToken])
+  @@index([isOnline])
+  @@map("desktop_agents")
+}
+
+// NEW MODEL: Agent activity log for debugging/audit
+model AgentActivityLog {
+  id           String            @id @default(uuid())
+  agentId      String
+  activityType AgentActivityType
+  description  String
+  metadata     Json?
+  createdAt    DateTime          @default(now())
+
+  @@index([agentId])
+  @@index([createdAt])
+  @@map("agent_activity_logs")
+}
+
+// NEW: Leaderboard snapshot for historical tracking
+model LeaderboardSnapshot {
+  id                     String            @id @default(uuid())
+  companyId              String
+  userId                 String
+  periodType             LeaderboardPeriod
+  periodStart            DateTime
+  periodEnd              DateTime
+  rank                   Int
+  // Metrics
+  tasksCompleted         Int               @default(0)
+  totalMinutes           Int               @default(0)
+  pointsEarned           Int               @default(0)
+  subProjectsContributed Int               @default(0)
+  projectsContributed    Int               @default(0)
+  // Performance score (weighted calculation)
+  performanceScore       Float             @default(0)
+  createdAt              DateTime          @default(now())
+
+  @@index([companyId, periodType, periodStart])
+  @@index([userId])
+  @@index([rank])
+  @@map("leaderboard_snapshots")
+}
+
+// NEW: Achievement/Badge system
+model Achievement {
+  id          String          @id @default(uuid())
+  userId      String
+  companyId   String
+  type        AchievementType
+  title       String
+  description String
+  iconUrl     String?
+  earnedAt    DateTime        @default(now())
+  metadata    Json? // Additional context
+
+  @@index([userId])
+  @@index([companyId, type])
+  @@map("achievements")
 }
 
 model Sop {
@@ -300,6 +537,10 @@ model ActivityLog {
   @@map("activity_logs")
 }
 
+// ============================================
+// ENUMS
+// ============================================
+
 enum UserRole {
   USER
   QC_ADMIN
@@ -335,6 +576,33 @@ enum SubProjectStatus {
   COMPLETED
 }
 
+// NEW: SubProject member roles
+enum SubProjectMemberRole {
+  MEMBER
+  CONTRIBUTOR
+  REVIEWER
+  QC_HEAD
+}
+
+// NEW: Task status
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  COMPLETED
+  BLOCKED
+  CANCELLED
+}
+
+// NEW: Priority levels
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+  CRITICAL
+}
+
 enum SopType {
   VIDEO
   DOCUMENT
@@ -359,6 +627,22 @@ enum NotificationType {
   DEPARTMENT_ASSIGNMENT
   ROLE_CHANGE
   SYSTEM
+  // Screen capture notification types
+  SCREENSHOT_DELETED
+  TIME_DEDUCTED
+  AGENT_OFFLINE
+  AGENT_INSTALLED
+  // NEW: SubProject and Task notifications
+  SUBPROJECT_ASSIGNMENT
+  SUBPROJECT_MEMBER_ADDED
+  SUBPROJECT_QC_HEAD_ASSIGNED
+  TASK_CREATED
+  TASK_COMPLETED
+  TASK_REASSIGNED
+  // NEW: Leaderboard and Achievement notifications
+  LEADERBOARD_RANK_CHANGED
+  ACHIEVEMENT_EARNED
+  STREAK_MILESTONE
 }
 
 enum ActivityType {
@@ -372,4 +656,93 @@ enum ActivityType {
   TIME_TRACKING_END
   DEPARTMENT_CREATED
   USER_ROLE_CHANGED
+  // Screen capture activity types
+  SCREENSHOT_CAPTURED
+  SCREENSHOT_DELETED
+  AGENT_REGISTERED
+  AGENT_DISCONNECTED
+  // NEW: SubProject and Task activity types
+  SUBPROJECT_CREATED
+  SUBPROJECT_UPDATED
+  SUBPROJECT_MEMBER_ADDED
+  SUBPROJECT_MEMBER_REMOVED
+  TASK_CREATED
+  TASK_ASSIGNED
+  TASK_COMPLETED
+  TASK_DELETED
+  // NEW: Leaderboard activity types
+  LEADERBOARD_UPDATED
+  ACHIEVEMENT_UNLOCKED
+}
+
+// NEW ENUMS for screen capture
+enum CaptureStatus {
+  SUCCESS
+  FAILED
+  PERMISSION_DENIED
+  IDLE_DETECTED
+  SCREEN_LOCKED
+  OFFLINE
+}
+
+enum Platform {
+  WINDOWS
+  MAC
+  LINUX
+}
+
+enum AgentActivityType {
+  STARTED
+  STOPPED
+  HEARTBEAT
+  CAPTURE_SUCCESS
+  CAPTURE_FAILED
+  ERROR
+  UPDATED
+  PERMISSION_CHANGED
+}
+
+// NEW: Leaderboard period types
+enum LeaderboardPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  ALL_TIME
+}
+
+// NEW: Achievement types
+enum AchievementType {
+  // Task milestones
+  FIRST_TASK_COMPLETED
+  TASKS_10_COMPLETED
+  TASKS_50_COMPLETED
+  TASKS_100_COMPLETED
+  TASKS_500_COMPLETED
+  // Time milestones
+  HOURS_10_TRACKED
+  HOURS_50_TRACKED
+  HOURS_100_TRACKED
+  HOURS_500_TRACKED
+  HOURS_1000_TRACKED
+  // Streak achievements
+  STREAK_7_DAYS
+  STREAK_30_DAYS
+  STREAK_90_DAYS
+  STREAK_365_DAYS
+  // Performance achievements
+  TOP_PERFORMER_WEEK
+  TOP_PERFORMER_MONTH
+  MOST_IMPROVED
+  // Collaboration achievements
+  TEAM_PLAYER
+  MENTOR
+  EARLY_BIRD
+  NIGHT_OWL
+  // Quality achievements
+  QUALITY_CHAMPION
+  ZERO_DEFECTS
+  // Custom achievements
+  CUSTOM
 }

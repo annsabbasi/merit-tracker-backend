@@ -1,14 +1,15 @@
 // src/modules/time-tracking/time-tracking.service.ts
+// UPDATED VERSION with Screen Capture Integration
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UserRole, NotificationType } from '@prisma/client';
+import { UserRole, NotificationType, ActivityType } from '@prisma/client';
 import { StartTimeTrackingDto, StopTimeTrackingDto, UpdateTimeTrackingDto, AddScreenshotDto, TimeTrackingQueryDto, ManualTimeEntryDto } from './dto/time-tracking.dto';
 
 const POINTS_CONFIG = {
     MINUTES_PER_POINT: 30,
     MAX_POINTS_PER_SESSION: 16,
     MIN_MINUTES_FOR_POINT: 15,
-    MILESTONE_HOURS: [10, 50, 100, 500, 1000], // Hours milestones for achievements
+    MILESTONE_HOURS: [10, 50, 100, 500, 1000],
 };
 
 @Injectable()
@@ -23,7 +24,7 @@ export class TimeTrackingService {
         type: NotificationType,
         title: string,
         message: string,
-        metadata?: Record<string, any>
+        metadata?: Record<string, any>,
     ) {
         await this.prisma.notification.create({
             data: {
@@ -37,9 +38,37 @@ export class TimeTrackingService {
     }
 
     // ============================================
-    // START TRACKING
+    // Helper: Check if user has desktop agent installed
+    // ============================================
+    private async checkAgentInstalled(userId: string): Promise<boolean> {
+        const agent = await this.prisma.desktopAgent.findFirst({
+            where: {
+                userId,
+                isActive: true,
+            },
+        });
+        return !!agent;
+    }
+
+    // ============================================
+    // Helper: Check if agent is online
+    // ============================================
+    private async checkAgentOnline(userId: string): Promise<boolean> {
+        const agent = await this.prisma.desktopAgent.findFirst({
+            where: {
+                userId,
+                isActive: true,
+                isOnline: true,
+            },
+        });
+        return !!agent;
+    }
+
+    // ============================================
+    // START TRACKING (Updated with screen capture check)
     // ============================================
     async start(dto: StartTimeTrackingDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
+        // Get the subproject with project and company info
         const subProject = await this.prisma.subProject.findFirst({
             where: { id: dto.subProjectId, project: { companyId } },
             include: {
@@ -47,6 +76,7 @@ export class TimeTrackingService {
                     include: {
                         members: true,
                         projectLead: { select: { id: true, firstName: true, lastName: true } },
+                        company: { select: { screenCaptureEnabled: true } },
                     },
                 },
             },
@@ -54,6 +84,7 @@ export class TimeTrackingService {
 
         if (!subProject) throw new NotFoundException('Task not found');
 
+        // Check if user is a member of the project
         const isMember = subProject.project.members.some((m) => m.userId === currentUserId);
         const isProjectLead = subProject.project.projectLeadId === currentUserId;
         const isAdmin = currentUserRole === UserRole.COMPANY || currentUserRole === UserRole.QC_ADMIN;
@@ -62,6 +93,37 @@ export class TimeTrackingService {
             throw new ForbiddenException('You must be a member of this project');
         }
 
+        // ============================================
+        // SCREEN CAPTURE REQUIREMENT CHECK
+        // ============================================
+        const screenCaptureRequired =
+            subProject.project.company.screenCaptureEnabled &&
+            subProject.project.screenCaptureEnabled;
+
+        if (screenCaptureRequired) {
+            // Check if user has desktop agent installed
+            const agentInstalled = await this.checkAgentInstalled(currentUserId);
+
+            if (!agentInstalled) {
+                throw new BadRequestException({
+                    code: 'AGENT_NOT_INSTALLED',
+                    message: 'Desktop agent is required for time tracking on this project. Please install the Merit Tracker Desktop app to continue.',
+                    downloadRequired: true,
+                });
+            }
+
+            // Check if agent is online (optional - could just warn)
+            const agentOnline = await this.checkAgentOnline(currentUserId);
+            if (!agentOnline) {
+                throw new BadRequestException({
+                    code: 'AGENT_OFFLINE',
+                    message: 'Your desktop agent appears to be offline. Please ensure Merit Tracker Desktop is running before starting time tracking.',
+                    agentOffline: true,
+                });
+            }
+        }
+
+        // Check for existing active timer
         const activeTimer = await this.prisma.timeTracking.findFirst({
             where: { userId: currentUserId, isActive: true },
             include: {
@@ -88,6 +150,7 @@ export class TimeTrackingService {
             });
         }
 
+        // Create time tracking entry
         const timeTracking = await this.prisma.timeTracking.create({
             data: {
                 userId: currentUserId,
@@ -95,11 +158,12 @@ export class TimeTrackingService {
                 startTime: new Date(),
                 notes: dto.notes,
                 isActive: true,
+                screenCaptureRequired, // Mark if screen capture is required
             },
             include: {
                 subProject: {
                     include: {
-                        project: { select: { id: true, name: true } },
+                        project: { select: { id: true, name: true, screenCaptureEnabled: true } },
                     },
                 },
                 user: { select: { id: true, firstName: true, lastName: true } },
@@ -111,22 +175,29 @@ export class TimeTrackingService {
             data: {
                 companyId,
                 userId: currentUserId,
-                activityType: 'TIME_TRACKING_START',
+                activityType: ActivityType.TIME_TRACKING_START,
                 description: `Started tracking time on task "${subProject.title}"`,
                 metadata: {
                     taskId: subProject.id,
                     taskTitle: subProject.title,
                     projectId: subProject.project.id,
                     projectName: subProject.project.name,
+                    screenCaptureRequired,
                 },
             },
         });
 
-        return timeTracking;
+        return {
+            ...timeTracking,
+            screenCaptureRequired,
+            message: screenCaptureRequired
+                ? 'Time tracking started. Screen capture is active.'
+                : 'Time tracking started.',
+        };
     }
 
     // ============================================
-    // STOP TRACKING
+    // STOP TRACKING (Updated with screenshot validation)
     // ============================================
     async stop(id: string, dto: StopTimeTrackingDto, currentUserId: string) {
         const timeTracking = await this.prisma.timeTracking.findFirst({
@@ -134,18 +205,37 @@ export class TimeTrackingService {
             include: {
                 subProject: {
                     include: {
-                        project: { select: { id: true, name: true, companyId: true } },
+                        project: { select: { id: true, name: true, companyId: true, screenCaptureEnabled: true } },
                     },
                 },
                 user: { select: { id: true, firstName: true, lastName: true, points: true } },
+                screenCaptures: {
+                    where: { isDeleted: false },
+                    select: { id: true, intervalMinutes: true },
+                },
             },
         });
 
         if (!timeTracking) throw new NotFoundException('Active session not found');
 
         const endTime = new Date();
-        const durationMinutes = this.calculateElapsedMinutes(timeTracking.startTime, endTime);
+        const rawDurationMinutes = this.calculateElapsedMinutes(timeTracking.startTime, endTime);
+
+        // Calculate effective duration (subtract any deducted time)
+        const durationMinutes = Math.max(0, rawDurationMinutes - timeTracking.timeDeducted);
         const pointsEarned = this.calculatePoints(durationMinutes);
+
+        // Screenshot validation for projects requiring screen capture
+        let screenshotWarning: string | null = null;
+        if (timeTracking.screenCaptureRequired) {
+            const expectedCaptures = Math.floor(rawDurationMinutes / 3); // ~3 min average
+            const actualCaptures = timeTracking.screenCaptures.length;
+            const captureRate = expectedCaptures > 0 ? (actualCaptures / expectedCaptures) * 100 : 100;
+
+            if (captureRate < 50) {
+                screenshotWarning = `Warning: Only ${actualCaptures} screenshots were captured (expected ~${expectedCaptures}). This may indicate the desktop agent was not running properly.`;
+            }
+        }
 
         const result = await this.prisma.$transaction(async (prisma) => {
             const updated = await prisma.timeTracking.update({
@@ -183,11 +273,7 @@ export class TimeTrackingService {
             return { updated, pointsEarned, newTotalPoints };
         });
 
-        // ============================================
-        // SEND NOTIFICATIONS
-        // ============================================
-
-        // Notify about points earned
+        // Send notification about points earned
         if (pointsEarned > 0) {
             await this.sendNotification(
                 currentUserId,
@@ -200,7 +286,8 @@ export class TimeTrackingService {
                     pointsEarned,
                     totalPoints: result.newTotalPoints,
                     duration: durationMinutes,
-                }
+                    screenshotsCount: timeTracking.screenCaptures.length,
+                },
             );
         }
 
@@ -212,7 +299,7 @@ export class TimeTrackingService {
             data: {
                 companyId: timeTracking.subProject.project.companyId,
                 userId: currentUserId,
-                activityType: 'TIME_TRACKING_END',
+                activityType: ActivityType.TIME_TRACKING_END,
                 description: `Tracked ${this.formatDuration(durationMinutes)} on task "${timeTracking.subProject.title}"`,
                 metadata: {
                     taskId: timeTracking.subProjectId,
@@ -221,11 +308,18 @@ export class TimeTrackingService {
                     projectName: timeTracking.subProject.project.name,
                     durationMinutes,
                     pointsEarned,
+                    screenshotsCount: timeTracking.screenCaptures.length,
                 },
             },
         });
 
-        return { ...result.updated, pointsEarned };
+        return {
+            ...result.updated,
+            pointsEarned,
+            totalPoints: result.newTotalPoints,
+            screenshotsCount: timeTracking.screenCaptures.length,
+            screenshotWarning,
+        };
     }
 
     // ============================================
@@ -241,7 +335,6 @@ export class TimeTrackingService {
 
         for (const milestone of POINTS_CONFIG.MILESTONE_HOURS) {
             if (totalHours >= milestone) {
-                // Check if milestone already achieved
                 const existingNotification = await this.prisma.notification.findFirst({
                     where: {
                         userId,
@@ -263,7 +356,7 @@ export class TimeTrackingService {
                             milestoneHours: milestone,
                             totalHours,
                             achievement: `${milestone}_HOURS_TRACKED`,
-                        }
+                        },
                     );
                 }
             }
@@ -284,7 +377,7 @@ export class TimeTrackingService {
     }
 
     // ============================================
-    // GET ACTIVE TIMER
+    // GET ACTIVE TIMER (Updated with screenshot info)
     // ============================================
     async getActiveTimer(currentUserId: string) {
         const activeTimer = await this.prisma.timeTracking.findFirst({
@@ -292,7 +385,18 @@ export class TimeTrackingService {
             include: {
                 subProject: {
                     include: {
-                        project: { select: { id: true, name: true } },
+                        project: { select: { id: true, name: true, screenCaptureEnabled: true } },
+                    },
+                },
+                screenCaptures: {
+                    where: { isDeleted: false },
+                    orderBy: { capturedAt: 'desc' },
+                    take: 5,
+                    select: {
+                        id: true,
+                        fileUrl: true,
+                        capturedAt: true,
+                        intervalMinutes: true,
                     },
                 },
             },
@@ -314,8 +418,12 @@ export class TimeTrackingService {
                 elapsedMinutes,
                 elapsedFormatted: this.formatDuration(elapsedMinutes),
                 notes: activeTimer.notes,
-                screenshots: activeTimer.screenshots,
                 potentialPoints: this.calculatePoints(elapsedMinutes),
+                screenCaptureRequired: activeTimer.screenCaptureRequired,
+                screenCaptureEnabled: activeTimer.subProject.project.screenCaptureEnabled,
+                recentScreenshots: activeTimer.screenCaptures,
+                screenshotsCount: activeTimer.screenCaptures.length,
+                timeDeducted: activeTimer.timeDeducted,
             },
         };
     }
@@ -343,8 +451,11 @@ export class TimeTrackingService {
                 user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
                 subProject: {
                     include: {
-                        project: { select: { id: true, name: true } },
+                        project: { select: { id: true, name: true, screenCaptureEnabled: true } },
                     },
+                },
+                _count: {
+                    select: { screenCaptures: true },
                 },
             },
             orderBy: { startTime: 'desc' },
@@ -353,7 +464,7 @@ export class TimeTrackingService {
     }
 
     // ============================================
-    // FIND ONE
+    // FIND ONE (Updated with screenshots)
     // ============================================
     async findOne(id: string, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         const timeTracking = await this.prisma.timeTracking.findFirst({
@@ -362,8 +473,12 @@ export class TimeTrackingService {
                 user: { select: { id: true, firstName: true, lastName: true, avatar: true } },
                 subProject: {
                     include: {
-                        project: { select: { id: true, name: true } },
+                        project: { select: { id: true, name: true, screenCaptureEnabled: true } },
                     },
+                },
+                screenCaptures: {
+                    where: { isDeleted: false },
+                    orderBy: { capturedAt: 'asc' },
                 },
             },
         });
@@ -374,7 +489,12 @@ export class TimeTrackingService {
             throw new ForbiddenException('Access denied');
         }
 
-        return timeTracking;
+        return {
+            ...timeTracking,
+            screenshotsCount: timeTracking.screenCaptures.length,
+            effectiveDuration: timeTracking.durationMinutes,
+            timeDeducted: timeTracking.timeDeducted,
+        };
     }
 
     // ============================================
@@ -394,7 +514,7 @@ export class TimeTrackingService {
     }
 
     // ============================================
-    // ADD SCREENSHOT
+    // ADD SCREENSHOT (Legacy - use screenshots module)
     // ============================================
     async addScreenshot(id: string, dto: AddScreenshotDto, currentUserId: string) {
         const timeTracking = await this.prisma.timeTracking.findFirst({
@@ -403,6 +523,7 @@ export class TimeTrackingService {
 
         if (!timeTracking) throw new NotFoundException('Active session not found');
 
+        // Legacy: Add to screenshots array
         return this.prisma.timeTracking.update({
             where: { id },
             data: { screenshots: { push: dto.screenshotUrl } },
@@ -444,6 +565,7 @@ export class TimeTrackingService {
                 durationMinutes,
                 notes: dto.notes,
                 isActive: false,
+                screenCaptureRequired: false, // Manual entries don't require screenshots
             },
             include: { subProject: true },
         });
@@ -462,7 +584,7 @@ export class TimeTrackingService {
                     projectName: subProject.project.name,
                     duration: durationMinutes,
                     addedBy: currentUserId,
-                }
+                },
             );
         }
 
@@ -490,7 +612,7 @@ export class TimeTrackingService {
     async getUserSummary(userId: string, companyId: string) {
         const where = { userId, isActive: false, subProject: { project: { companyId } } };
 
-        const [entries, totals] = await Promise.all([
+        const [entries, totals, screenshotStats] = await Promise.all([
             this.prisma.timeTracking.findMany({
                 where,
                 include: {
@@ -499,17 +621,23 @@ export class TimeTrackingService {
                             project: { select: { id: true, name: true } },
                         },
                     },
+                    _count: { select: { screenCaptures: true } },
                 },
                 orderBy: { startTime: 'desc' },
             }),
             this.prisma.timeTracking.aggregate({
                 where,
-                _sum: { durationMinutes: true },
+                _sum: { durationMinutes: true, timeDeducted: true },
+                _count: true,
+            }),
+            this.prisma.screenshot.aggregate({
+                where: { userId, isDeleted: false },
                 _count: true,
             }),
         ]);
 
         const totalMinutes = totals._sum.durationMinutes || 0;
+        const totalDeducted = totals._sum.timeDeducted || 0;
 
         return {
             entries,
@@ -518,6 +646,8 @@ export class TimeTrackingService {
                 totalMinutes,
                 totalHours: Math.round(totalMinutes / 60 * 100) / 100,
                 totalFormatted: this.formatDuration(totalMinutes),
+                totalDeducted,
+                totalScreenshots: screenshotStats._count,
             },
         };
     }
@@ -529,11 +659,11 @@ export class TimeTrackingService {
         const project = await this.prisma.project.findFirst({ where: { id: projectId, companyId } });
         if (!project) throw new NotFoundException('Project not found');
 
-        const [byUser, byTask, totals] = await Promise.all([
+        const [byUser, byTask, totals, screenshotStats] = await Promise.all([
             this.prisma.timeTracking.groupBy({
                 by: ['userId'],
                 where: { subProject: { projectId }, isActive: false },
-                _sum: { durationMinutes: true },
+                _sum: { durationMinutes: true, timeDeducted: true },
                 _count: true,
             }),
             this.prisma.timeTracking.groupBy({
@@ -544,7 +674,14 @@ export class TimeTrackingService {
             }),
             this.prisma.timeTracking.aggregate({
                 where: { subProject: { projectId }, isActive: false },
-                _sum: { durationMinutes: true },
+                _sum: { durationMinutes: true, timeDeducted: true },
+                _count: true,
+            }),
+            this.prisma.screenshot.aggregate({
+                where: {
+                    timeTracking: { subProject: { projectId } },
+                    isDeleted: false,
+                },
                 _count: true,
             }),
         ]);
@@ -564,20 +701,25 @@ export class TimeTrackingService {
         ]);
 
         const totalMinutes = totals._sum.durationMinutes || 0;
+        const totalDeducted = totals._sum.timeDeducted || 0;
 
         return {
             projectId,
+            screenCaptureEnabled: project.screenCaptureEnabled,
             summary: {
                 totalSessions: totals._count,
                 totalMinutes,
                 totalHours: Math.round(totalMinutes / 60 * 100) / 100,
                 totalFormatted: this.formatDuration(totalMinutes),
+                totalDeducted,
+                totalScreenshots: screenshotStats._count,
             },
             byUser: byUser.map((u) => ({
                 user: users.find((usr) => usr.id === u.userId),
                 sessions: u._count,
                 totalMinutes: u._sum.durationMinutes || 0,
                 totalHours: Math.round((u._sum.durationMinutes || 0) / 60 * 100) / 100,
+                timeDeducted: u._sum.timeDeducted || 0,
             })),
             byTask: byTask.map((t) => ({
                 task: tasks.find((tsk) => tsk.id === t.subProjectId),
@@ -599,7 +741,7 @@ export class TimeTrackingService {
         if (durationMinutes < POINTS_CONFIG.MIN_MINUTES_FOR_POINT) return 0;
         return Math.min(
             Math.floor(durationMinutes / POINTS_CONFIG.MINUTES_PER_POINT),
-            POINTS_CONFIG.MAX_POINTS_PER_SESSION
+            POINTS_CONFIG.MAX_POINTS_PER_SESSION,
         );
     }
 
