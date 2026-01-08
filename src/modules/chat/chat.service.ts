@@ -39,9 +39,13 @@ export class ChatService {
     }
 
     async findRoom(id: string, companyId: string) {
-        const room = await this.prisma.chatRoom.findFirst({ where: { id, project: { companyId } }, include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, firstName: true, lastName: true } }, members: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true, role: true } } } } } });
-        if (!room) throw new NotFoundException('Chat room not found');
-        return room;
+        try {
+            const room = await this.prisma.chatRoom.findFirst({ where: { id, project: { companyId } }, include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, firstName: true, lastName: true } }, members: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true, role: true } } } } } });
+            if (!room) throw new NotFoundException('Chat room not found');
+            return room;
+        } catch (error) {
+            console.log("Error in findRoom:", error)
+        }
     }
 
     async updateRoom(id: string, dto: UpdateChatRoomDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
@@ -53,7 +57,7 @@ export class ChatService {
     async addMembers(id: string, dto: AddChatMembersDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         const room = await this.findRoom(id, companyId);
         if (!this.canManageRoom(currentUserId, currentUserRole, room)) throw new ForbiddenException('Insufficient permissions');
-        const project = await this.prisma.project.findUnique({ where: { id: room.projectId }, include: { members: true } });
+        const project = await this.prisma.project.findUnique({ where: { id: room?.projectId }, include: { members: true } });
         const validUserIds = dto.userIds.filter((userId) => project?.members.some((m) => m.userId === userId) || project?.projectLeadId === userId);
         if (!validUserIds.length) throw new BadRequestException('No valid project members');
         await this.prisma.chatRoomMember.createMany({ data: validUserIds.map((userId) => ({ chatRoomId: id, userId })), skipDuplicates: true });
@@ -63,21 +67,21 @@ export class ChatService {
     async removeMembers(id: string, dto: RemoveChatMembersDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         const room = await this.findRoom(id, companyId);
         if (!this.canManageRoom(currentUserId, currentUserRole, room)) throw new ForbiddenException('Insufficient permissions');
-        if (dto.userIds.includes(room.createdById)) throw new BadRequestException('Cannot remove room creator');
+        if (dto.userIds.includes((room as any)?.createdById)) throw new BadRequestException('Cannot remove room creator');
         await this.prisma.chatRoomMember.deleteMany({ where: { chatRoomId: id, userId: { in: dto.userIds } } });
         return this.findRoom(id, companyId);
     }
 
     async deleteRoom(id: string, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         const room = await this.findRoom(id, companyId);
-        if (room.createdById !== currentUserId && currentUserRole !== UserRole.COMPANY) throw new ForbiddenException('Only room creator or company admin can delete');
+        if (room?.createdById !== currentUserId && currentUserRole !== UserRole.COMPANY) throw new ForbiddenException('Only room creator or company admin can delete');
         await this.prisma.chatRoom.delete({ where: { id } });
         return { message: 'Chat room deleted' };
     }
 
     async sendMessage(roomId: string, dto: SendMessageDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         const room = await this.findRoom(roomId, companyId);
-        const isMember = room.members.some((m) => m.userId === currentUserId);
+        const isMember = room?.members.some((m) => m.userId === currentUserId);
         if (!isMember && currentUserRole === UserRole.USER) throw new ForbiddenException('You must be a room member');
         const message = await this.prisma.chatMessage.create({ data: { chatRoomId: roomId, senderId: currentUserId, content: dto.content }, include: { sender: { select: { id: true, firstName: true, lastName: true, avatar: true } } } });
         await this.prisma.chatRoom.update({ where: { id: roomId }, data: { updatedAt: new Date() } });
@@ -86,7 +90,7 @@ export class ChatService {
 
     async getMessages(roomId: string, currentUserId: string, currentUserRole: UserRole, companyId: string, limit = 50, before?: string) {
         const room = await this.findRoom(roomId, companyId);
-        const isMember = room.members.some((m) => m.userId === currentUserId);
+        const isMember = room?.members.some((m) => m.userId === currentUserId);
         if (!isMember && currentUserRole === UserRole.USER) throw new ForbiddenException('You must be a room member');
         const where: any = { chatRoomId: roomId, isDeleted: false };
         if (before) where.createdAt = { lt: new Date(before) };
