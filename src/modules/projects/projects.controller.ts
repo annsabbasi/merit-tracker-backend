@@ -15,9 +15,10 @@ import { CurrentUser } from '../auth/guards';
 export class ProjectsController {
     constructor(private readonly projectsService: ProjectsService) { }
 
-    @Post('/create')
+    @Post('create')
     @ApiOperation({ summary: 'Create a new project' })
     async create(@Body() createDto: CreateProjectDto, @CurrentUser('role') role: string, @CurrentUser('id') userId: string, @CurrentUser('companyId') companyId: string) {
+        console.log("Hitted the controller")
         return this.projectsService.create(createDto, role as any, userId, companyId);
     }
 

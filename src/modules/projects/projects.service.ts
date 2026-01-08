@@ -1,7 +1,7 @@
 // src/modules/projects/projects.service.ts
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UserRole, ProjectMemberRole, NotificationType } from '@prisma/client';
+import { UserRole, ProjectMemberRole, NotificationType, ProjectStatus } from '@prisma/client';
 import { CreateProjectDto, UpdateProjectDto, AddProjectMembersDto, RemoveProjectMembersDto, UpdateMemberRoleDto, ProjectQueryDto } from './dto/projects.dto';
 
 @Injectable()
@@ -64,19 +64,18 @@ export class ProjectsService {
     // ============================================
     // CREATE PROJECT - ONLY COMPANY ADMIN CAN CREATE
     // ============================================
+    // UPDATE THIS PART IN: src/modules/projects/projects.service.ts
+    // Replace the create method with this updated version
+
     async create(createDto: CreateProjectDto, currentUserRole: UserRole, currentUserId: string, companyId: string) {
-        // ============================================
-        // RESTRICTION: Only COMPANY role can create projects
-        // ============================================
+        console.log("Company hitted")
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company administrators can create projects. Please contact your company admin.');
         }
 
         const { memberIds, startDate, endDate, departmentId, ...restProjectData } = createDto;
 
-        // ============================================
-        // VALIDATE: Department must exist and belong to company
-        // ============================================
+        // Validate Department
         const department = await this.prisma.department.findFirst({
             where: { id: departmentId, companyId },
             include: {
@@ -98,11 +97,12 @@ export class ProjectsService {
             }
         }
 
-        // Prepare project data
+        // Prepare project data - NOW INCLUDING STATUS
         const projectData = {
             ...restProjectData,
             companyId,
             budget: restProjectData.budget || null,
+            status: restProjectData.status || ProjectStatus.PLANNING, // Add status with default
             startDate: this.toDateTime(startDate),
             endDate: this.toDateTime(endDate),
         };
@@ -113,9 +113,7 @@ export class ProjectsService {
                 data: projectData,
             });
 
-            // ============================================
-            // LINK PROJECT TO DEPARTMENT
-            // ============================================
+            // Link project to department
             await prisma.departmentProject.create({
                 data: {
                     departmentId,
@@ -161,7 +159,6 @@ export class ProjectsService {
                     update: { role: ProjectMemberRole.LEAD },
                 });
 
-                // Remove from addedMemberIds to avoid duplicate notification
                 const leadIndex = addedMemberIds.indexOf(restProjectData.projectLeadId);
                 if (leadIndex > -1) {
                     addedMemberIds.splice(leadIndex, 1);
@@ -218,11 +215,7 @@ export class ProjectsService {
             return { project: completeProject, addedMemberIds, departmentName: department.name };
         });
 
-        // ============================================
-        // SEND NOTIFICATIONS
-        // ============================================
-
-        // Notify project lead
+        // Send notifications (same as before)
         if (restProjectData.projectLeadId && restProjectData.projectLeadId !== currentUserId) {
             await this.sendNotification(
                 restProjectData.projectLeadId,
@@ -239,7 +232,6 @@ export class ProjectsService {
             );
         }
 
-        // Notify added members
         if (result.addedMemberIds.length > 0) {
             const membersToNotify = result.addedMemberIds.filter(id => id !== currentUserId);
             await this.sendBulkNotifications(
@@ -257,7 +249,6 @@ export class ProjectsService {
             );
         }
 
-        // Notify department head if exists and different from creator
         if (department.lead && department.lead.id !== currentUserId) {
             await this.sendNotification(
                 department.lead.id,

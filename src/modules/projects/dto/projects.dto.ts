@@ -1,5 +1,4 @@
 // src/modules/projects/dto/projects.dto.ts
-// UPDATED VERSION with Screen Capture option
 import { IsString, IsOptional, IsEnum, IsNumber, IsBoolean, IsDateString, IsArray, IsUUID, Min, Max } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ProjectStatus, ProjectMemberRole } from '@prisma/client';
@@ -21,6 +20,15 @@ export class CreateProjectDto {
     @IsOptional()
     @IsNumber()
     budget?: number;
+
+    @ApiPropertyOptional({
+        description: 'Project status',
+        enum: ProjectStatus,
+        default: ProjectStatus.PLANNING
+    })
+    @IsOptional()
+    @IsEnum(ProjectStatus)
+    status?: ProjectStatus;
 
     @ApiProperty({ description: 'Department ID (required - every project must belong to a department)' })
     @IsUUID()

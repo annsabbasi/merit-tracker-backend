@@ -38,6 +38,8 @@ export class SubProjectsService {
     // ============================================
     // CREATE SUBPROJECT - ANYONE IN COMPANY CAN CREATE
     // ============================================
+    // REPLACE the create method in: src/modules/sub-projects/sub-projects.service.ts
+
     async create(createDto: CreateSubProjectDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         const project = await this.prisma.project.findFirst({
             where: { id: createDto.projectId, companyId },
@@ -61,24 +63,35 @@ export class SubProjectsService {
             if (!qcHead) throw new BadRequestException('QC Head must be a user with QC_ADMIN role');
         }
 
+        // Handle legacy assignedToId - add to memberIds
+        let memberIdsToAdd = createDto.memberIds || [];
+        if (createDto.assignedToId && !memberIdsToAdd.includes(createDto.assignedToId)) {
+            memberIdsToAdd = [...memberIdsToAdd, createDto.assignedToId];
+        }
+
         // Validate members
         let validMemberIds: string[] = [];
-        if (createDto.memberIds?.length) {
+        if (memberIdsToAdd.length > 0) {
             const validMembers = await this.prisma.user.findMany({
-                where: { id: { in: createDto.memberIds }, companyId, isActive: true },
+                where: { id: { in: memberIdsToAdd }, companyId, isActive: true },
                 select: { id: true },
             });
             validMemberIds = validMembers.map(m => m.id);
-            if (validMemberIds.length !== createDto.memberIds.length) {
+            if (validMemberIds.length !== memberIdsToAdd.length) {
                 throw new BadRequestException('Some member IDs are invalid');
             }
         }
 
-        const { dueDate, memberIds, ...restData } = createDto;
+        const { dueDate, memberIds, assignedToId, ...restData } = createDto;
 
         const result = await this.prisma.$transaction(async (prisma) => {
             const subProject = await prisma.subProject.create({
-                data: { ...restData, dueDate: this.toDateTime(dueDate), createdById: currentUserId },
+                data: {
+                    ...restData,
+                    status: restData.status || SubProjectStatus.TODO, // Use provided status or default to TODO
+                    dueDate: this.toDateTime(dueDate),
+                    createdById: currentUserId,
+                },
             });
 
             // Add creator as member

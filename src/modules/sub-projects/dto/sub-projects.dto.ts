@@ -33,6 +33,20 @@ export class CreateSubProjectDto {
     @IsUUID()
     projectId: string;
 
+    @ApiPropertyOptional({
+        description: 'Initial status of the subproject',
+        enum: SubProjectStatus,
+        default: SubProjectStatus.TODO
+    })
+    @IsEnum(SubProjectStatus)
+    @IsOptional()
+    status?: SubProjectStatus;
+
+    @ApiPropertyOptional({ description: 'User ID to assign this subproject to (LEGACY - use memberIds instead)' })
+    @IsUUID()
+    @IsOptional()
+    assignedToId?: string;
+
     @ApiPropertyOptional({ description: 'User ID of the QC Head (must be QC_ADMIN role)' })
     @IsUUID()
     @IsOptional()
