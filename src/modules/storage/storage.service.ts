@@ -90,6 +90,47 @@ export class StorageService {
         }
     }
 
+    // Add to storage.service.ts
+    async debugBucketInfo(): Promise<void> {
+        try {
+            console.log('=== DEBUG: Supabase Bucket Info ===');
+            console.log('Bucket name from config:', this.bucketName);
+
+            // List all buckets
+            const { data: buckets, error: bucketsError } = await this.supabase.storage.listBuckets();
+
+            if (bucketsError) {
+                console.error('Error listing buckets:', bucketsError);
+                return;
+            }
+
+            console.log('Available buckets:');
+            buckets?.forEach((bucket: any) => {
+                console.log(`- ${bucket.name} (public: ${bucket.public}, size: ${bucket.fileSizeLimit})`);
+            });
+
+            // Check if our bucket exists
+            const bucketExists = buckets?.some(b => b.name === this.bucketName);
+            console.log(`Bucket "${this.bucketName}" exists: ${bucketExists}`);
+
+            if (bucketExists) {
+                // List files in bucket to see structure
+                const { data: files } = await this.supabase.storage
+                    .from(this.bucketName)
+                    .list();
+
+                console.log(`Files in bucket "${this.bucketName}":`, files?.length || 0);
+                if (files && files.length > 0) {
+                    console.log('Sample files:', files.slice(0, 5));
+                }
+            }
+
+            console.log('=== END DEBUG ===');
+        } catch (error) {
+            console.error('Debug error:', error);
+        }
+    }
+
     /**
      * Upload a file to Supabase Storage
      */
@@ -124,6 +165,71 @@ export class StorageService {
         const { data: urlData } = this.supabase.storage
             .from(this.bucketName)
             .getPublicUrl(filePath);
+
+        return {
+            url: urlData.publicUrl,
+            path: filePath,
+            bucket: this.bucketName,
+            fileName,
+            originalName: file.originalname,
+            mimeType: file.mimetype,
+            size: file.size,
+        };
+    }
+
+
+    // In storage.service.ts - FIXED uploadScreenshot method
+    async uploadScreenshot(
+        file: Express.Multer.File,
+        companyId: string,
+        userId: string,
+        timeTrackingId: string,
+    ): Promise<UploadResult> {
+        // Validate it's actually an image
+        this.validateFile(file, {
+            maxSizeMB: 5,
+            allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+        });
+
+        // Generate unique filename
+        const fileExt = path.extname(file.originalname) || '.jpg';
+        const fileName = `${uuidv4()}${fileExt}`;
+
+        // FIX: Remove 'screenshots/' prefix since bucket name is already 'sops'
+        const filePath = `${companyId}/screenshots/${userId}/${timeTrackingId}/${fileName}`;
+
+        console.log('Uploading screenshot to Supabase:');
+        console.log('- Bucket:', this.bucketName);
+        console.log('- Full path:', filePath);
+        console.log('- File size:', file.size, 'bytes');
+
+        // Upload to Supabase
+        const { data, error } = await this.supabase.storage
+            .from(this.bucketName)
+            .upload(filePath, file.buffer, {
+                contentType: file.mimetype,
+                upsert: false,
+            });
+
+        if (error) {
+            console.error('Supabase screenshot upload error DETAILS:', {
+                message: error.message,
+                error,
+                bucket: this.bucketName,
+                path: filePath,
+                fileSize: file.size,
+                mimetype: file.mimetype,
+            });
+            throw new InternalServerErrorException(`Failed to upload screenshot: ${error.message}`);
+        }
+
+        // Get public URL
+        const { data: urlData } = this.supabase.storage
+            .from(this.bucketName)
+            .getPublicUrl(filePath);
+
+        console.log(`✅ Screenshot uploaded successfully: ${filePath}`);
+        console.log(`🌐 Public URL: ${urlData.publicUrl}`);
 
         return {
             url: urlData.publicUrl,

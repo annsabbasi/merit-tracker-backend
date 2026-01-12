@@ -106,11 +106,11 @@ export class ScreenshotsService {
         }
 
         // Upload file to storage
-        const uploadResult = await this.storageService.uploadFile(
+        const uploadResult = await this.storageService.uploadScreenshot(
             file,
             companyId,
-            `${SCREENSHOT_BUCKET}/${agentUserId}/${dto.timeTrackingId}`,
-            { maxSizeMB: 5, allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'] },
+            agentUserId,
+            dto.timeTrackingId,
         );
 
         // Get previous screenshot to calculate interval
@@ -128,13 +128,13 @@ export class ScreenshotsService {
             : timeTracking.startTime;
         const intervalMinutes = this.calculateIntervalMinutes(intervalStart, capturedAt);
 
-        // Create screenshot record
+        // Create screenshot record in database
         const screenshot = await this.prisma.screenshot.create({
             data: {
                 timeTrackingId: dto.timeTrackingId,
                 userId: agentUserId,
-                filePath: uploadResult.path,
-                fileUrl: uploadResult.url,
+                filePath: uploadResult.path,       // Save the Supabase path
+                fileUrl: uploadResult.url,         // Save the public URL
                 fileSize: uploadResult.size,
                 capturedAt,
                 intervalStart,
