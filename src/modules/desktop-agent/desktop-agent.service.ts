@@ -27,8 +27,13 @@ const CURRENT_AGENT_VERSIONS = {
 };
 
 // Download URLs (these would be your actual download URLs)
+// const AGENT_DOWNLOAD_URLS = {
+//     WINDOWS: 'https://downloads.merittracker.com/agent/MeritTracker-Setup-1.0.0.exe',
+//     MAC: 'https://downloads.merittracker.com/agent/MeritTracker-1.0.0.dmg',
+//     LINUX: 'https://downloads.merittracker.com/agent/merit-tracker-1.0.0.AppImage',
+// };
 const AGENT_DOWNLOAD_URLS = {
-    WINDOWS: 'https://downloads.merittracker.com/agent/MeritTracker-Setup-1.0.0.exe',
+    WINDOWS: 'https://h2oqis7bxnp74uea.public.blob.vercel-storage.com/MeritTracker-Setup-1.0.0.exe',
     MAC: 'https://downloads.merittracker.com/agent/MeritTracker-1.0.0.dmg',
     LINUX: 'https://downloads.merittracker.com/agent/merit-tracker-1.0.0.AppImage',
 };

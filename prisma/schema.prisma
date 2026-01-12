@@ -81,6 +81,7 @@ model User {
   currentStreak              Int                 @default(0) // Days in a row with completed tasks
   longestStreak              Int                 @default(0)
   lastActiveDate             DateTime?
+  oneTimeCodes               OneTimeCode[]
 
   @@index([companyId])
   @@index([email])
@@ -164,6 +165,24 @@ model ProjectMember {
   @@index([projectId])
   @@index([userId])
   @@map("project_members")
+}
+
+model OneTimeCode {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  userId    String
+  type      String // DESKTOP_AUTH, PASSWORD_RESET, etc.
+  expiresAt DateTime
+  usedAt    DateTime?
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([code])
+  @@index([expiresAt])
+  @@index([userId])
 }
 
 // ENHANCED: SubProject now has QC Head and members
