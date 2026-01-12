@@ -1,5 +1,5 @@
 // src/modules/auth/desktop-auth.controller.ts
-import { Controller, Post, Body, Get, Query, Headers, HttpCode } from '@nestjs/common';
+import { Controller, Post, Body, Get, Query, Headers, HttpCode, UnauthorizedException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiExcludeEndpoint } from '@nestjs/swagger';
 // import { AuthService } from './auth.service';
 import { JwtService } from '@nestjs/jwt';
@@ -62,6 +62,51 @@ export class DesktopAuthController {
         }
     }
 
+
+    // ============================================
+    // SIMPLIFIED DIRECT LOGIN
+    // ============================================
+
+    @Post('login-direct')
+    @ApiOperation({ summary: 'Direct login for desktop agent' })
+    async loginDirect(@Body() dto: { email: string; password: string }) {
+        try {
+            // Validate credentials using your existing auth service
+            const user = await this.authService.validateUser(dto.email, dto.password);
+
+            if (!user) {
+                throw new UnauthorizedException('Invalid credentials');
+            }
+
+            // Generate JWT token
+            const payload = {
+                sub: user.id,
+                email: user.email,
+                companyId: user.companyId,
+                role: user.role,
+            };
+
+            const jwtToken = this.jwtService.sign(payload, {
+                secret: this.configService.get('JWT_SECRET'),
+                expiresIn: '30d',
+            });
+
+            return {
+                access_token: jwtToken,
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    companyId: user.companyId,
+                    role: user.role,
+                },
+            };
+
+        } catch (error) {
+            throw new UnauthorizedException('Invalid credentials');
+        }
+    }
     /**
      * Exchange desktop token for JWT (used by Electron)
      */
