@@ -8,6 +8,7 @@ import {
     ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import {
     UserRole,
     NotificationType,
@@ -27,7 +28,10 @@ const SCREENSHOT_RETENTION_DAYS = 60;
 
 @Injectable()
 export class DesktopAgentApiService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private storageService: StorageService,
+    ) { }
 
     // ============================================
     // HELPER: Validate Agent Token & Get User
@@ -567,7 +571,7 @@ export class DesktopAgentApiService {
     }
 
     // ============================================
-    // UPLOAD SCREENSHOT (Agent Authenticated)
+    // UPLOAD SCREENSHOT (Agent Authenticated) - Uses Supabase Storage
     // ============================================
     async uploadScreenshot(
         agentToken: string,
@@ -616,10 +620,13 @@ export class DesktopAgentApiService {
             throw new BadRequestException('Screen capture is not enabled for this project');
         }
 
-        // For now, we'll store the file path - in production you'd upload to Supabase/S3
-        // This is a placeholder - you should integrate with your StorageService
-        const filePath = `screenshots/${company.id}/${user.id}/${timeTrackingId}/${Date.now()}.jpg`;
-        const fileUrl = filePath; // In production, this would be the CDN URL
+        // Upload to Supabase using StorageService
+        const uploadResult = await this.storageService.uploadScreenshot(
+            file,
+            company.id,
+            user.id,
+            timeTrackingId,
+        );
 
         // Get previous screenshot for interval calculation
         const previousScreenshot = await this.prisma.screenshot.findFirst({
@@ -642,14 +649,14 @@ export class DesktopAgentApiService {
         const expiresAt = new Date();
         expiresAt.setDate(expiresAt.getDate() + SCREENSHOT_RETENTION_DAYS);
 
-        // Create screenshot record
+        // Create screenshot record with Supabase URL
         const screenshot = await this.prisma.screenshot.create({
             data: {
                 timeTrackingId,
                 userId: user.id,
-                filePath,
-                fileUrl,
-                fileSize: file.size,
+                filePath: uploadResult.path,      // Supabase path
+                fileUrl: uploadResult.url,        // Supabase public URL
+                fileSize: uploadResult.size,
                 capturedAt: capturedAtDate,
                 intervalStart,
                 intervalEnd: capturedAtDate,
@@ -682,6 +689,7 @@ export class DesktopAgentApiService {
                     screenshotId: screenshot.id,
                     timeTrackingId,
                     intervalMinutes,
+                    supabasePath: uploadResult.path,
                 },
             },
         });
@@ -689,6 +697,7 @@ export class DesktopAgentApiService {
         return {
             id: screenshot.id,
             fileUrl: screenshot.fileUrl,
+            filePath: screenshot.filePath,
             capturedAt: screenshot.capturedAt,
             intervalMinutes: screenshot.intervalMinutes,
         };

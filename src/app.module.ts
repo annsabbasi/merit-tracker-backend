@@ -1,10 +1,10 @@
 // src/app.module.ts
-// UPDATED VERSION with Leaderboard and Tasks modules
+// UPDATED VERSION - Removed SupabaseModule (use StorageModule instead)
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
-import { SupabaseModule } from './supabase/supabase.module';
+// REMOVED: import { SupabaseModule } from './supabase/supabase.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CompaniesModule } from './modules/companies/companies.module';
@@ -28,15 +28,15 @@ import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
-    SupabaseModule,
-    StorageModule,
+    // REMOVED: SupabaseModule - Use StorageModule instead
+    StorageModule,  // This handles all Supabase storage operations
     AuthModule,
     UsersModule,
     CompaniesModule,
     DepartmentsModule,
     ProjectsModule,
     SubProjectsModule,
-    TasksModule, // NEW: Task management within subprojects
+    TasksModule,
     TimeTrackingModule,
     SopsModule,
     ChatModule,
@@ -46,7 +46,7 @@ import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
     ScreenshotsModule,
     DesktopAgentModule,
     ScheduledTasksModule,
-    // NEW: Leaderboard and performance tracking
+    // Leaderboard and performance tracking
     LeaderboardModule,
   ],
   providers: [
