@@ -3,10 +3,13 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '../../prisma/prisma.service';
 import { User, UserRole, NotificationType } from '@prisma/client';
 import { UpdateUserDto, UpdateUserRoleDto } from './dto/users.dto';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class UsersService {
-    constructor(private prisma: PrismaService) { }
+    constructor(private prisma: PrismaService,
+        private emailService: EmailService,
+    ) { }
 
     // ============================================
     // Helper: Send notification
@@ -377,6 +380,70 @@ export class UsersService {
                 },
             },
         });
+    }
+
+    // Add after role update method
+    async updateUserRole(
+        userId: string,
+        newRole: UserRole,
+        currentUserId: string,
+        companyId: string,
+    ) {
+        const user = await this.prisma.user.findFirst({
+            where: { id: userId, companyId },
+        });
+
+        if (!user) throw new NotFoundException('User not found');
+
+        const oldRole = user.role;
+        const isPromotion = this.isRolePromotion(oldRole, newRole);
+
+        const updatedUser = await this.prisma.user.update({
+            where: { id: userId },
+            data: { role: newRole },
+        });
+
+        // Send email notification
+        if (userId !== currentUserId) {
+            await this.emailService.sendRoleChangedEmail(
+                user.email,
+                user.firstName,
+                oldRole,
+                newRole,
+                isPromotion,
+            );
+        }
+
+        return updatedUser;
+    }
+
+    // Add activation/deactivation emails
+    async activateUser(userId: string, companyId: string) {
+        const user = await this.prisma.user.update({
+            where: { id: userId },
+            data: { isActive: true },
+        });
+
+        await this.emailService.sendAccountActivatedEmail(
+            user.email,
+            user.firstName,
+        );
+
+        return user;
+    }
+
+    async deactivateUser(userId: string, companyId: string) {
+        const user = await this.prisma.user.update({
+            where: { id: userId },
+            data: { isActive: false },
+        });
+
+        await this.emailService.sendAccountDeactivatedEmail(
+            user.email,
+            user.firstName,
+        );
+
+        return user;
     }
 
     // ============================================

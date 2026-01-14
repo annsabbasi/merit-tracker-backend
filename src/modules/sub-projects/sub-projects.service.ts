@@ -147,101 +147,6 @@ export class SubProjectsService {
     }
 
     // ============================================
-    // FIND ALL
-    // ============================================
-    async findAll(projectId: string, companyId: string, query?: SubProjectQueryDto) {
-        const project = await this.prisma.project.findFirst({ where: { id: projectId, companyId } });
-        if (!project) throw new NotFoundException('Project not found');
-
-        const where: any = { projectId };
-        if (query?.status) where.status = query.status;
-        if (query?.priority) where.priority = query.priority;
-        if (query?.search) {
-            where.OR = [
-                { title: { contains: query.search, mode: 'insensitive' } },
-                { description: { contains: query.search, mode: 'insensitive' } },
-            ];
-        }
-        if (query?.qcHeadId) where.qcHeadId = query.qcHeadId;
-        if (query?.memberId) where.members = { some: { userId: query.memberId } };
-
-        return this.prisma.subProject.findMany({
-            where,
-            include: {
-                createdBy: { select: { id: true, firstName: true, lastName: true } },
-                qcHead: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true } },
-                project: { select: { id: true, name: true } },
-                members: {
-                    include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true, role: true } } },
-                    orderBy: { role: 'asc' },
-                },
-                _count: { select: { tasks: true, timeTrackings: true, members: true } },
-            },
-            orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-        });
-    }
-
-    // ============================================
-    // FIND ONE
-    // ============================================
-    async findOne(id: string, companyId: string) {
-        const subProject = await this.prisma.subProject.findFirst({
-            where: { id, project: { companyId } },
-            include: {
-                createdBy: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-                qcHead: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true, role: true } },
-                project: {
-                    select: {
-                        id: true, name: true, projectLeadId: true, companyId: true,
-                        projectLead: { select: { id: true, firstName: true, lastName: true } }
-                    },
-                },
-                members: {
-                    include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true, role: true, points: true } } },
-                    orderBy: [{ role: 'asc' }, { pointsEarned: 'desc' }],
-                },
-                tasks: {
-                    include: {
-                        assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-                        createdBy: { select: { id: true, firstName: true, lastName: true } },
-                    },
-                    orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-                },
-                timeTrackings: {
-                    include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
-                    orderBy: { startTime: 'desc' },
-                    take: 10,
-                },
-                _count: { select: { tasks: true, timeTrackings: true, members: true } },
-            },
-        });
-
-        if (!subProject) throw new NotFoundException('Subproject not found');
-
-        const stats = await this.getSubProjectStats(id, companyId);
-        return { ...subProject, stats };
-    }
-
-    // ============================================
-    // FIND USER SUBPROJECTS
-    // ============================================
-    async findUserSubProjects(userId: string, companyId: string) {
-        return this.prisma.subProject.findMany({
-            where: {
-                project: { companyId },
-                OR: [{ createdById: userId }, { qcHeadId: userId }, { members: { some: { userId } } }],
-            },
-            include: {
-                project: { select: { id: true, name: true } },
-                qcHead: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-                createdBy: { select: { id: true, firstName: true, lastName: true } },
-                _count: { select: { tasks: true, members: true, timeTrackings: true } },
-            },
-            orderBy: [{ status: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
-        });
-    }
-
-    // ============================================
     // UPDATE SUBPROJECT
     // ============================================
     async update(id: string, updateDto: UpdateSubProjectDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
@@ -482,6 +387,102 @@ export class SubProjectsService {
                 sessionCount: timeStats._count,
             },
         };
+    }
+
+
+    // ============================================
+    // FIND ALL
+    // ============================================
+    async findAll(projectId: string, companyId: string, query?: SubProjectQueryDto) {
+        const project = await this.prisma.project.findFirst({ where: { id: projectId, companyId } });
+        if (!project) throw new NotFoundException('Project not found');
+
+        const where: any = { projectId };
+        if (query?.status) where.status = query.status;
+        if (query?.priority) where.priority = query.priority;
+        if (query?.search) {
+            where.OR = [
+                { title: { contains: query.search, mode: 'insensitive' } },
+                { description: { contains: query.search, mode: 'insensitive' } },
+            ];
+        }
+        if (query?.qcHeadId) where.qcHeadId = query.qcHeadId;
+        if (query?.memberId) where.members = { some: { userId: query.memberId } };
+
+        return this.prisma.subProject.findMany({
+            where,
+            include: {
+                createdBy: { select: { id: true, firstName: true, lastName: true } },
+                qcHead: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true } },
+                project: { select: { id: true, name: true } },
+                members: {
+                    include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true, role: true } } },
+                    orderBy: { role: 'asc' },
+                },
+                _count: { select: { tasks: true, timeTrackings: true, members: true } },
+            },
+            orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+        });
+    }
+
+    // ============================================
+    // FIND ONE
+    // ============================================
+    async findOne(id: string, companyId: string) {
+        const subProject = await this.prisma.subProject.findFirst({
+            where: { id, project: { companyId } },
+            include: {
+                createdBy: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+                qcHead: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true, role: true } },
+                project: {
+                    select: {
+                        id: true, name: true, projectLeadId: true, companyId: true,
+                        projectLead: { select: { id: true, firstName: true, lastName: true } }
+                    },
+                },
+                members: {
+                    include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true, role: true, points: true } } },
+                    orderBy: [{ role: 'asc' }, { pointsEarned: 'desc' }],
+                },
+                tasks: {
+                    include: {
+                        assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+                        createdBy: { select: { id: true, firstName: true, lastName: true } },
+                    },
+                    orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+                },
+                timeTrackings: {
+                    include: { user: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
+                    orderBy: { startTime: 'desc' },
+                    take: 10,
+                },
+                _count: { select: { tasks: true, timeTrackings: true, members: true } },
+            },
+        });
+
+        if (!subProject) throw new NotFoundException('Subproject not found');
+
+        const stats = await this.getSubProjectStats(id, companyId);
+        return { ...subProject, stats };
+    }
+
+    // ============================================
+    // FIND USER SUBPROJECTS
+    // ============================================
+    async findUserSubProjects(userId: string, companyId: string) {
+        return this.prisma.subProject.findMany({
+            where: {
+                project: { companyId },
+                OR: [{ createdById: userId }, { qcHeadId: userId }, { members: { some: { userId } } }],
+            },
+            include: {
+                project: { select: { id: true, name: true } },
+                qcHead: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+                createdBy: { select: { id: true, firstName: true, lastName: true } },
+                _count: { select: { tasks: true, members: true, timeTrackings: true } },
+            },
+            orderBy: [{ status: 'asc' }, { priority: 'desc' }, { createdAt: 'desc' }],
+        });
     }
 
     // ============================================

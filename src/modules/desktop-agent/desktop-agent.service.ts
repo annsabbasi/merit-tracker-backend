@@ -12,6 +12,8 @@ import {
     AgentStartTrackingDto,
     AgentStopTrackingDto,
 } from './dto/desktop-agent.dto';
+import { EmailService } from '../email/email.service';
+import { EmailType } from '../email/interfaces/email.interface';
 
 // Constants
 const AGENT_TOKEN_EXPIRY_DAYS = 30;
@@ -40,7 +42,9 @@ const AGENT_DOWNLOAD_URLS = {
 
 @Injectable()
 export class DesktopAgentService {
-    constructor(private prisma: PrismaService) { }
+    constructor(private prisma: PrismaService,
+        private emailService: EmailService,
+    ) { }
 
     // ============================================
     // Helper: Generate secure token
@@ -112,6 +116,18 @@ export class DesktopAgentService {
             },
         });
 
+        // Get user info for email
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { email: true, firstName: true }
+        });
+
+        // Get company info for email
+        const company = await this.prisma.company.findUnique({
+            where: { id: companyId },
+            select: { name: true }
+        });
+
         if (existingAgent) {
             // Update existing agent with new token
             const newToken = this.generateAgentToken();
@@ -158,6 +174,20 @@ export class DesktopAgentService {
             },
         });
 
+        // 🔥 SEND AGENT INSTALLED EMAIL
+        try {
+            if (user && company) {
+                await this.emailService.sendAgentInstalledEmail(
+                    user.email,
+                    user.firstName,
+                    dto.machineName || dto.machineId,
+                    dto.platform
+                );
+            }
+        } catch (error) {
+            console.error('Failed to send agent installed email:', error);
+        }
+
         // Log activity
         await this.prisma.activityLog.create({
             data: {
@@ -180,7 +210,7 @@ export class DesktopAgentService {
             { platform: dto.platform, version: dto.agentVersion },
         );
 
-        // Notify user
+        // Notify user (in-app notification)
         await this.sendNotification(
             userId,
             NotificationType.AGENT_INSTALLED,
@@ -383,7 +413,15 @@ export class DesktopAgentService {
     async deactivateAgent(id: string, userId: string, userRole: UserRole, companyId: string) {
         const agent = await this.prisma.desktopAgent.findUnique({
             where: { id },
-            include: { user: { select: { companyId: true } } },
+            include: {
+                user: {
+                    select: {
+                        companyId: true,
+                        email: true,
+                        firstName: true
+                    }
+                }
+            },
         });
 
         if (!agent) {
@@ -415,7 +453,35 @@ export class DesktopAgentService {
             { deactivatedBy: userId },
         );
 
-        // Notify user if deactivated by admin
+        // 🔥 SEND EMAIL IF AGENT WAS DEACTIVATED BY ADMIN
+        try {
+            if (agent.userId !== userId && agent.user) {
+                // Get admin user info
+                const adminUser = await this.prisma.user.findUnique({
+                    where: { id: userId },
+                    select: { firstName: true, lastName: true }
+                });
+
+                const adminName = adminUser ?
+                    `${adminUser.firstName} ${adminUser.lastName}` :
+                    'Administrator';
+
+                await this.emailService.sendTemplatedEmail(
+                    EmailType.ACCOUNT_DEACTIVATED, // Or create a specific agent deactivation email type
+                    agent.user.email,
+                    {
+                        recipientName: agent.user.firstName,
+                        deactivatedBy: adminName,
+                        machineName: agent.machineName || agent.machineId,
+                        reason: 'Desktop agent deactivated by administrator',
+                    }
+                );
+            }
+        } catch (error) {
+            console.error('Failed to send agent deactivation email:', error);
+        }
+
+        // Notify user if deactivated by admin (in-app notification)
         if (agent.userId !== userId) {
             await this.sendNotification(
                 agent.userId,
@@ -524,6 +590,31 @@ export class DesktopAgentService {
         const timeoutThreshold = new Date();
         timeoutThreshold.setMinutes(timeoutThreshold.getMinutes() - HEARTBEAT_TIMEOUT_MINUTES);
 
+        // Find agents that are currently online but haven't sent heartbeat
+        const offlineAgents = await this.prisma.desktopAgent.findMany({
+            where: {
+                isOnline: true,
+                lastHeartbeat: { lt: timeoutThreshold },
+                user: { isActive: true }, // Only active users
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        email: true,
+                        firstName: true,
+                        company: {
+                            select: {
+                                id: true,
+                                name: true,
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Mark them as offline
         const result = await this.prisma.desktopAgent.updateMany({
             where: {
                 isOnline: true,
@@ -532,11 +623,37 @@ export class DesktopAgentService {
             data: { isOnline: false },
         });
 
+        // 🔥 SEND OFFLINE WARNING EMAILS
+        try {
+            for (const agent of offlineAgents) {
+                // Only send email if agent was online for more than 1 hour previously
+                const wasOnlineForLong = agent.lastHeartbeat &&
+                    agent.lastHeartbeat < new Date(Date.now() - 60 * 60 * 1000);
+
+                if (wasOnlineForLong && agent.user) {
+                    await this.emailService.sendTemplatedEmail(
+                        EmailType.AGENT_OFFLINE_WARNING,
+                        agent.user.email,
+                        {
+                            recipientName: agent.user.firstName,
+                            machineName: agent.machineName || agent.machineId,
+                            companyName: agent.user.company?.name || 'your company',
+                        }
+                    );
+                }
+            }
+        } catch (error) {
+            console.error('Failed to send agent offline emails:', error);
+        }
+
         if (result.count > 0) {
             console.log(`Marked ${result.count} agents as offline`);
         }
 
-        return { markedOffline: result.count };
+        return {
+            markedOffline: result.count,
+            notifiedAgents: offlineAgents.length
+        };
     }
 
     // ============================================

@@ -5,12 +5,14 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RegisterCompanyDto, RegisterUserDto, LoginDto } from './dto/auth.dto';
 import { UserRole, SubscriptionStatus } from '@prisma/client';
+import { EmailService } from '../email/email.service'; // ADD THIS
 
 @Injectable()
 export class AuthService {
     constructor(
         private prisma: PrismaService,
         private jwtService: JwtService,
+        private emailService: EmailService, // ADD THIS
     ) { }
 
     async validateUser(email: string, password: string): Promise<any> {
@@ -68,7 +70,7 @@ export class AuthService {
                 id: user.company.id,
                 name: user.company.name,
                 logo: user.company.logo,
-                companyCode: user.company.companyCode, // Add this line
+                companyCode: user.company.companyCode,
             },
             subscription: subscriptionStatus,
         };
@@ -119,16 +121,28 @@ export class AuthService {
             return { company, user };
         });
 
-        // Get the login response first
+        // 🔥 SEND WELCOME EMAIL TO COMPANY ADMIN
+        try {
+            await this.emailService.sendWelcomeCompanyEmail(
+                result.user.email,
+                result.user.firstName,
+                result.company.name,
+                result.company.companyCode,
+            );
+        } catch (error) {
+            // Log error but don't fail registration
+            console.error('Failed to send welcome email:', error);
+        }
+
+        // Get the login response
         const loginResponse = await this.login({
             email: result.user.email,
             password: registerDto.password
         });
 
-        // Add companyCode to the response
         return {
             ...loginResponse,
-            companyCode: result.company.companyCode // Add this line
+            companyCode: result.company.companyCode
         };
     }
 
@@ -160,7 +174,7 @@ export class AuthService {
 
         const hashedPassword = await bcrypt.hash(registerDto.password, 10);
 
-        await this.prisma.user.create({
+        const user = await this.prisma.user.create({
             data: {
                 email: registerDto.email,
                 password: hashedPassword,
@@ -172,6 +186,17 @@ export class AuthService {
                 phone: registerDto.phone,
             },
         });
+
+        // 🔥 SEND WELCOME EMAIL TO NEW USER
+        try {
+            await this.emailService.sendWelcomeUserEmail(
+                user.email,
+                user.firstName,
+                company.name,
+            );
+        } catch (error) {
+            console.error('Failed to send welcome email:', error);
+        }
 
         return this.login({ email: registerDto.email, password: registerDto.password });
     }

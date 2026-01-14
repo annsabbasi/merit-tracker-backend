@@ -122,95 +122,6 @@ export class TasksService {
     }
 
     // ============================================
-    // FIND ALL BY SUBPROJECT
-    // ============================================
-    async findAllBySubProject(subProjectId: string, companyId: string, query?: TaskQueryDto) {
-        const subProject = await this.prisma.subProject.findFirst({
-            where: { id: subProjectId, project: { companyId } },
-        });
-        if (!subProject) throw new NotFoundException('SubProject not found');
-
-        const where: any = { subProjectId };
-        if (query?.status) where.status = query.status;
-        if (query?.priority) where.priority = query.priority;
-        if (query?.assignedToId) where.assignedToId = query.assignedToId;
-        if (query?.createdById) where.createdById = query.createdById;
-        if (query?.search) {
-            where.OR = [
-                { title: { contains: query.search, mode: 'insensitive' } },
-                { description: { contains: query.search, mode: 'insensitive' } },
-            ];
-        }
-
-        return this.prisma.task.findMany({
-            where,
-            include: {
-                assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-                createdBy: { select: { id: true, firstName: true, lastName: true } },
-                _count: { select: { timeTrackings: true } },
-            },
-            orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-        });
-    }
-
-    // ============================================
-    // FIND MY TASKS
-    // ============================================
-    async findMyTasks(userId: string, companyId: string, query?: TaskQueryDto) {
-        const where: any = {
-            assignedToId: userId,
-            subProject: { project: { companyId } },
-        };
-        if (query?.status) where.status = query.status;
-        if (query?.priority) where.priority = query.priority;
-
-        return this.prisma.task.findMany({
-            where,
-            include: {
-                subProject: {
-                    select: {
-                        id: true,
-                        title: true,
-                        project: { select: { id: true, name: true } },
-                    },
-                },
-                createdBy: { select: { id: true, firstName: true, lastName: true } },
-                _count: { select: { timeTrackings: true } },
-            },
-            orderBy: [{ status: 'asc' }, { priority: 'desc' }, { dueDate: 'asc' }],
-        });
-    }
-
-    // ============================================
-    // FIND ONE
-    // ============================================
-    async findOne(id: string, companyId: string) {
-        const task = await this.prisma.task.findFirst({
-            where: { id, subProject: { project: { companyId } } },
-            include: {
-                assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true } },
-                createdBy: { select: { id: true, firstName: true, lastName: true } },
-                subProject: {
-                    select: {
-                        id: true,
-                        title: true,
-                        qcHeadId: true,
-                        createdById: true,
-                        project: { select: { id: true, name: true, projectLeadId: true, companyId: true } },
-                    },
-                },
-                timeTrackings: {
-                    orderBy: { startTime: 'desc' },
-                    take: 5,
-                },
-            },
-        });
-
-        if (!task) throw new NotFoundException('Task not found');
-        return task;
-    }
-
-    // ============================================
     // UPDATE TASK
     // ============================================
     async update(id: string, updateDto: UpdateTaskDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
@@ -410,6 +321,96 @@ export class TasksService {
             `Deleted task "${task.title}"`, { taskTitle: task.title, subProjectId: task.subProject.id });
 
         return { message: 'Task deleted successfully' };
+    }
+
+
+    // ============================================
+    // FIND ALL BY SUBPROJECT
+    // ============================================
+    async findAllBySubProject(subProjectId: string, companyId: string, query?: TaskQueryDto) {
+        const subProject = await this.prisma.subProject.findFirst({
+            where: { id: subProjectId, project: { companyId } },
+        });
+        if (!subProject) throw new NotFoundException('SubProject not found');
+
+        const where: any = { subProjectId };
+        if (query?.status) where.status = query.status;
+        if (query?.priority) where.priority = query.priority;
+        if (query?.assignedToId) where.assignedToId = query.assignedToId;
+        if (query?.createdById) where.createdById = query.createdById;
+        if (query?.search) {
+            where.OR = [
+                { title: { contains: query.search, mode: 'insensitive' } },
+                { description: { contains: query.search, mode: 'insensitive' } },
+            ];
+        }
+
+        return this.prisma.task.findMany({
+            where,
+            include: {
+                assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+                createdBy: { select: { id: true, firstName: true, lastName: true } },
+                _count: { select: { timeTrackings: true } },
+            },
+            orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+        });
+    }
+
+    // ============================================
+    // FIND MY TASKS
+    // ============================================
+    async findMyTasks(userId: string, companyId: string, query?: TaskQueryDto) {
+        const where: any = {
+            assignedToId: userId,
+            subProject: { project: { companyId } },
+        };
+        if (query?.status) where.status = query.status;
+        if (query?.priority) where.priority = query.priority;
+
+        return this.prisma.task.findMany({
+            where,
+            include: {
+                subProject: {
+                    select: {
+                        id: true,
+                        title: true,
+                        project: { select: { id: true, name: true } },
+                    },
+                },
+                createdBy: { select: { id: true, firstName: true, lastName: true } },
+                _count: { select: { timeTrackings: true } },
+            },
+            orderBy: [{ status: 'asc' }, { priority: 'desc' }, { dueDate: 'asc' }],
+        });
+    }
+
+    // ============================================
+    // FIND ONE
+    // ============================================
+    async findOne(id: string, companyId: string) {
+        const task = await this.prisma.task.findFirst({
+            where: { id, subProject: { project: { companyId } } },
+            include: {
+                assignedTo: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true } },
+                createdBy: { select: { id: true, firstName: true, lastName: true } },
+                subProject: {
+                    select: {
+                        id: true,
+                        title: true,
+                        qcHeadId: true,
+                        createdById: true,
+                        project: { select: { id: true, name: true, projectLeadId: true, companyId: true } },
+                    },
+                },
+                timeTrackings: {
+                    orderBy: { startTime: 'desc' },
+                    take: 5,
+                },
+            },
+        });
+
+        if (!task) throw new NotFoundException('Task not found');
+        return task;
     }
 
     // ============================================

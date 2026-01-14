@@ -1,12 +1,17 @@
 // src/modules/companies/companies.service.ts
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { UserRole } from '@prisma/client';
+import { UserRole, SubscriptionStatus } from '@prisma/client';
+import { EmailService } from '../email/email.service'; // ADD THIS
+import { EmailType } from '../email/interfaces/email.interface'; // ADD THIS
 import { UpdateCompanyDto } from './dto/companies.dto';
 
 @Injectable()
 export class CompaniesService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private emailService: EmailService, // ADD THIS
+    ) { }
 
     async findOne(id: string) {
         const company = await this.prisma.company.findUnique({
@@ -31,10 +36,58 @@ export class CompaniesService {
             throw new ForbiddenException('Only company admin can update company details');
         }
 
-        return this.prisma.company.update({
+        const oldCompany = await this.prisma.company.findUnique({
+            where: { id },
+            select: {
+                subscriptionStatus: true,
+                trialEndsAt: true,
+                subscriptionEndsAt: true,
+            }
+        });
+
+        const updatedCompany = await this.prisma.company.update({
             where: { id },
             data: updateDto,
         });
+
+        // 🔥 SEND EMAIL IF SUBSCRIPTION STATUS CHANGED
+        if ((updateDto as any).subscriptionStatus && (updateDto as any).subscriptionStatus !== oldCompany?.subscriptionStatus) {
+            try {
+                // Get company admin for notification
+                const companyAdmin = await this.prisma.user.findFirst({
+                    where: {
+                        companyId: id,
+                        role: UserRole.COMPANY
+                    },
+                    select: { email: true, firstName: true }
+                });
+
+                if (companyAdmin) {
+                    switch ((updateDto as any).subscriptionStatus) {
+                        case SubscriptionStatus.ACTIVE:
+                            // Subscription activated
+                            await this.emailService.sendAccountActivatedEmail(
+                                companyAdmin.email,
+                                companyAdmin.firstName
+                            );
+                            break;
+                        case SubscriptionStatus.EXPIRED:
+                        case SubscriptionStatus.CANCELLED:
+                            // Subscription expired/cancelled
+                            await this.emailService.sendSubscriptionExpiredEmail(
+                                companyAdmin.email,
+                                companyAdmin.firstName,
+                                updatedCompany.name
+                            );
+                            break;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to send subscription status email:', error);
+            }
+        }
+
+        return updatedCompany;
     }
 
     async getCompanyStats(companyId: string) {
@@ -49,6 +102,35 @@ export class CompaniesService {
 
         if (!company) {
             throw new NotFoundException('Company not found');
+        }
+
+        // 🔥 CHECK FOR TRIAL ENDING SOON (3 days or less)
+        const now = new Date();
+        if (company.subscriptionStatus === SubscriptionStatus.TRIAL && company.trialEndsAt) {
+            const daysRemaining = Math.ceil((company.trialEndsAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+
+            if (daysRemaining <= 3 && daysRemaining > 0) {
+                try {
+                    const companyAdmin = await this.prisma.user.findFirst({
+                        where: {
+                            companyId,
+                            role: UserRole.COMPANY
+                        },
+                        select: { email: true, firstName: true }
+                    });
+
+                    if (companyAdmin) {
+                        await this.emailService.sendTrialEndingSoonEmail(
+                            companyAdmin.email,
+                            companyAdmin.firstName,
+                            company.name,
+                            daysRemaining
+                        );
+                    }
+                } catch (error) {
+                    console.error('Failed to send trial ending email:', error);
+                }
+            }
         }
 
         return {

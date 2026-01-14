@@ -1,8 +1,10 @@
 // src/modules/leaderboard/leaderboard.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LeaderboardPeriod, NotificationType, AchievementType } from '@prisma/client';
 import { LeaderboardQueryDto, UserPerformanceQueryDto } from './dto/leaderboard.dto';
+import { EmailService } from '../email/email.service';
+import { EmailType } from '../email/interfaces/email.interface';
 
 // Performance score weights
 const PERFORMANCE_WEIGHTS = {
@@ -23,7 +25,10 @@ const ACHIEVEMENT_THRESHOLDS = {
 
 @Injectable()
 export class LeaderboardService {
-    constructor(private prisma: PrismaService) { }
+    private readonly logger = new Logger(LeaderboardService.name);
+    constructor(private prisma: PrismaService,
+        private emailService: EmailService,
+    ) { }
 
     // ============================================
     // GET COMPANY LEADERBOARD
@@ -163,13 +168,23 @@ export class LeaderboardService {
             return { ...entry, trend, previousRank };
         });
 
-        return {
+        const result = {
             period: query.period || LeaderboardPeriod.ALL_TIME,
             startDate,
             endDate,
             totalParticipants: users.length,
             leaderboard: leaderboardWithTrends,
         };
+
+        // 🔥 OPTIONAL: Send weekly leaderboard email to top performers
+        // You might want to run this as a scheduled task instead
+        if (query.period === LeaderboardPeriod.WEEKLY && limit <= 10) {
+            this.sendLeaderboardEmails(result, companyId).catch(error => {
+                this.logger.error('Failed to send leaderboard emails:', error);
+            });
+        }
+
+        return result;
     }
 
     // ============================================
@@ -556,13 +571,16 @@ export class LeaderboardService {
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
             select: {
+                id: true,
+                firstName: true,
+                email: true,
                 totalTasksCompleted: true,
                 totalTimeTrackedMinutes: true,
                 currentStreak: true,
             },
         });
 
-        if (!user) return;
+        if (!user) return [];
 
         const existingAchievements = await this.prisma.achievement.findMany({
             where: { userId },
@@ -570,7 +588,12 @@ export class LeaderboardService {
         });
 
         const existingTypes = new Set(existingAchievements.map(a => a.type));
-        const newAchievements: { type: AchievementType; title: string; description: string }[] = [];
+        const newAchievements: {
+            type: AchievementType;
+            title: string;
+            description: string;
+            milestoneValue?: number;
+        }[] = [];
 
         // Check task achievements
         const taskAchievements: [number, AchievementType, string, string][] = [
@@ -583,7 +606,12 @@ export class LeaderboardService {
 
         for (const [threshold, type, title, description] of taskAchievements) {
             if (user.totalTasksCompleted >= threshold && !existingTypes.has(type)) {
-                newAchievements.push({ type, title, description });
+                newAchievements.push({
+                    type,
+                    title,
+                    description,
+                    milestoneValue: user.totalTasksCompleted
+                });
             }
         }
 
@@ -599,7 +627,12 @@ export class LeaderboardService {
 
         for (const [threshold, type, title, description] of timeAchievements) {
             if (totalHours >= threshold && !existingTypes.has(type)) {
-                newAchievements.push({ type, title, description });
+                newAchievements.push({
+                    type,
+                    title,
+                    description,
+                    milestoneValue: Math.floor(totalHours)
+                });
             }
         }
 
@@ -613,7 +646,12 @@ export class LeaderboardService {
 
         for (const [threshold, type, title, description] of streakAchievements) {
             if (user.currentStreak >= threshold && !existingTypes.has(type)) {
-                newAchievements.push({ type, title, description });
+                newAchievements.push({
+                    type,
+                    title,
+                    description,
+                    milestoneValue: user.currentStreak
+                });
             }
         }
 
@@ -627,6 +665,19 @@ export class LeaderboardService {
                 },
             });
 
+            // 🔥 SEND ACHIEVEMENT EMAIL
+            try {
+                await this.emailService.sendAchievementEarnedEmail(
+                    user.email,
+                    user.firstName,
+                    achievement.title,
+                    achievement.description
+                );
+            } catch (error) {
+                this.logger.error(`Failed to send achievement email to ${user.email}:`, error);
+            }
+
+            // In-app notification
             await this.prisma.notification.create({
                 data: {
                     userId,
@@ -641,13 +692,22 @@ export class LeaderboardService {
         return newAchievements;
     }
 
+
     // ============================================
     // UPDATE USER STREAK
     // ============================================
     async updateUserStreak(userId: string) {
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
-            select: { lastActiveDate: true, currentStreak: true, longestStreak: true, companyId: true },
+            select: {
+                id: true,
+                firstName: true,
+                email: true,
+                lastActiveDate: true,
+                currentStreak: true,
+                longestStreak: true,
+                companyId: true
+            },
         });
 
         if (!user) return;
@@ -659,6 +719,7 @@ export class LeaderboardService {
         if (lastActive) lastActive.setHours(0, 0, 0, 0);
 
         let newStreak = 1;
+        let streakIncreased = false;
 
         if (lastActive) {
             const diffDays = Math.floor((today.getTime() - lastActive.getTime()) / (1000 * 60 * 60 * 24));
@@ -669,6 +730,7 @@ export class LeaderboardService {
             } else if (diffDays === 1) {
                 // Consecutive day
                 newStreak = user.currentStreak + 1;
+                streakIncreased = true;
             }
             // If more than 1 day, streak resets to 1
         }
@@ -683,6 +745,27 @@ export class LeaderboardService {
                 lastActiveDate: today,
             },
         });
+
+        // 🔥 SEND STREAK MILESTONE EMAIL FOR SIGNIFICANT MILESTONES
+        if (streakIncreased && user.currentStreak > 0) {
+            const streakMilestones = [7, 30, 90, 180, 365];
+
+            if (streakMilestones.includes(newStreak)) {
+                try {
+                    await this.emailService.sendTemplatedEmail(
+                        EmailType.STREAK_MILESTONE,
+                        user.email,
+                        {
+                            recipientName: user.firstName,
+                            streakDays: newStreak,
+                            companyName: 'Merit Tracker', // You might want to get actual company name
+                        }
+                    );
+                } catch (error) {
+                    this.logger.error(`Failed to send streak milestone email to ${user.email}:`, error);
+                }
+            }
+        }
 
         // Check for streak achievements
         await this.checkAndAwardAchievements(userId, user.companyId);
@@ -869,5 +952,35 @@ export class LeaderboardService {
                 performanceScore: entry.performanceScore,
             })),
         });
+    }
+
+    private async sendLeaderboardEmails(leaderboard: any, companyId: string) {
+        const company = await this.prisma.company.findUnique({
+            where: { id: companyId },
+            select: { name: true }
+        });
+
+        // Send email to top 3 performers
+        const topPerformers = leaderboard.leaderboard.slice(0, 3);
+
+        for (const performer of topPerformers) {
+            try {
+                // Check if email exists
+                if (performer.user?.email) {
+                    await this.emailService.sendTemplatedEmail(
+                        EmailType.MILESTONE_REACHED,
+                        performer.user.email,
+                        {
+                            recipientName: performer.user.firstName,
+                            milestoneType: `${leaderboard.period} Leaderboard`,
+                            milestoneValue: `Rank #${performer.rank}`,
+                            companyName: company?.name || 'Merit Tracker',
+                        }
+                    );
+                }
+            } catch (error) {
+                this.logger.error(`Failed to send leaderboard email to ${performer.user?.email}:`, error);
+            }
+        }
     }
 }

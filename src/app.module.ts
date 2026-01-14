@@ -23,6 +23,7 @@ import { ScreenshotsModule } from './modules/screenshots/screenshots.module';
 import { DesktopAgentModule } from './modules/desktop-agent/desktop-agent.module';
 import { ScheduledTasksModule } from './modules/scheduled-tasks/scheduled-tasks.module';
 import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
     PrismaModule,
     // REMOVED: SupabaseModule - Use StorageModule instead
     StorageModule,  // This handles all Supabase storage operations
+    EmailModule,
     AuthModule,
     UsersModule,
     CompaniesModule,

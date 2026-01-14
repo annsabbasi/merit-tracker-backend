@@ -1,12 +1,29 @@
 // src/modules/projects/projects.service.ts
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, ProjectMemberRole, NotificationType, ProjectStatus } from '@prisma/client';
 import { CreateProjectDto, UpdateProjectDto, AddProjectMembersDto, RemoveProjectMembersDto, UpdateMemberRoleDto, ProjectQueryDto } from './dto/projects.dto';
+import { EmailService } from '../email/email.service';
+import { EmailType } from '../email/interfaces/email.interface';
+
+interface UserBasicInfo {
+    id?: string;
+    email: string;
+    firstName: string;
+}
+
+interface LeadUserInfo extends UserBasicInfo {
+    lastName?: string;
+}
 
 @Injectable()
 export class ProjectsService {
-    constructor(private prisma: PrismaService) { }
+    private readonly logger = new Logger(ProjectsService.name);
+
+    constructor(
+        private prisma: PrismaService,
+        private emailService: EmailService,
+    ) { }
 
     // Helper function to convert date string to proper DateTime
     private toDateTime(dateString?: string): Date | undefined {
@@ -64,9 +81,6 @@ export class ProjectsService {
     // ============================================
     // CREATE PROJECT - ONLY COMPANY ADMIN CAN CREATE
     // ============================================
-    // UPDATE THIS PART IN: src/modules/projects/projects.service.ts
-    // Replace the create method with this updated version
-
     async create(createDto: CreateProjectDto, currentUserRole: UserRole, currentUserId: string, companyId: string) {
         console.log("Company hitted")
         if (currentUserRole !== UserRole.COMPANY) {
@@ -79,7 +93,7 @@ export class ProjectsService {
         const department = await this.prisma.department.findFirst({
             where: { id: departmentId, companyId },
             include: {
-                lead: { select: { id: true, firstName: true, lastName: true } },
+                lead: { select: { id: true, firstName: true, lastName: true, email: true } },
             },
         });
 
@@ -88,13 +102,16 @@ export class ProjectsService {
         }
 
         // Validate project lead if provided
+        let projectLeadUser: LeadUserInfo | null = null;
         if (restProjectData.projectLeadId) {
             const lead = await this.prisma.user.findFirst({
                 where: { id: restProjectData.projectLeadId, companyId, isActive: true },
+                select: { id: true, email: true, firstName: true, lastName: true }
             });
             if (!lead) {
                 throw new BadRequestException('Project lead not found or inactive');
             }
+            projectLeadUser = lead;
         }
 
         // Prepare project data - NOW INCLUDING STATUS
@@ -106,6 +123,12 @@ export class ProjectsService {
             startDate: this.toDateTime(startDate),
             endDate: this.toDateTime(endDate),
         };
+
+        // Get company name for emails
+        const company = await this.prisma.company.findUnique({
+            where: { id: companyId },
+            select: { name: true }
+        });
 
         const result = await this.prisma.$transaction(async (prisma) => {
             // Create the project
@@ -124,13 +147,17 @@ export class ProjectsService {
 
             // Add members if provided
             const addedMemberIds: string[] = [];
+            let addedMembers: UserBasicInfo[] = [];
             if (memberIds?.length) {
                 const users = await prisma.user.findMany({
                     where: { id: { in: memberIds }, companyId, isActive: true },
+                    select: { id: true, email: true, firstName: true }
                 });
                 if (users.length !== memberIds.length) {
                     throw new BadRequestException('Some users not found or inactive');
                 }
+                addedMembers = users;
+
                 await prisma.projectMember.createMany({
                     data: memberIds.map((userId) => ({
                         projectId: project.id,
@@ -212,10 +239,71 @@ export class ProjectsService {
                 },
             });
 
-            return { project: completeProject, addedMemberIds, departmentName: department.name };
+            // Return data for email notifications
+            return {
+                project: completeProject,
+                addedMemberIds,
+                departmentName: department.name,
+                companyName: company?.name,
+                projectLeadUser,
+                addedMembers,
+                projectName: completeProject?.name || restProjectData.name,
+                projectId: project.id
+            };
         });
 
-        // Send notifications (same as before)
+        // 🔥 SEND PROJECT CREATED EMAIL TO DEPARTMENT HEAD
+        try {
+            if (department.lead && department.lead.email) {
+                await this.emailService.sendTemplatedEmail(
+                    EmailType.PROJECT_CREATED,
+                    department.lead.email,
+                    {
+                        recipientName: department.lead.firstName,
+                        projectName: result.projectName,
+                        departmentName: result.departmentName,
+                        createdBy: 'Company Admin', // You might want to get the actual admin name
+                        projectUrl: `${process.env.APP_URL || 'https://merittracker.com'}/projects/${result.projectId}`
+                    }
+                );
+            }
+        } catch (error) {
+            this.logger.error(`Failed to send project created email to department head:`, error);
+        }
+
+        // 🔥 SEND PROJECT LEAD ASSIGNMENT EMAIL
+        if (result.projectLeadUser && result.projectLeadUser.email && result.projectLeadUser.id !== currentUserId) {
+            try {
+                await this.emailService.sendProjectLeadAssignmentEmail(
+                    result.projectLeadUser.email,
+                    result.projectLeadUser.firstName,
+                    result.projectName,
+                    result.departmentName
+                );
+            } catch (error) {
+                this.logger.error(`Failed to send project lead assignment email:`, error);
+            }
+        }
+
+        // 🔥 SEND PROJECT ASSIGNMENT EMAILS TO MEMBERS
+        try {
+            for (const member of result.addedMembers) {
+                if (member.email && member.id !== currentUserId) {
+                    await this.emailService.sendProjectAssignmentEmail(
+                        member.email,
+                        member.firstName,
+                        result.projectName,
+                        result.departmentName,
+                        'Team Member',
+                        'Company Administrator'
+                    );
+                }
+            }
+        } catch (error) {
+            this.logger.error(`Failed to send project assignment emails:`, error);
+        }
+
+        // In-app notifications
         if (restProjectData.projectLeadId && restProjectData.projectLeadId !== currentUserId) {
             await this.sendNotification(
                 restProjectData.projectLeadId,
@@ -468,29 +556,38 @@ export class ProjectsService {
         const { startDate, endDate, ...restUpdateData } = updateDto;
         const updateData: any = { ...restUpdateData };
 
-        if (updateDto.budget !== undefined) {
-            updateData.budget = updateDto.budget;
-        }
-        if (startDate !== undefined) {
-            updateData.startDate = startDate ? this.toDateTime(startDate) : null;
-        }
-        if (endDate !== undefined) {
-            updateData.endDate = endDate ? this.toDateTime(endDate) : null;
-        }
+        // Get current user info for emails
+        const currentUser = await this.prisma.user.findUnique({
+            where: { id: currentUserId },
+            select: { firstName: true, lastName: true }
+        });
+        const changedBy = currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'System';
 
         // Check if project lead is changing
         const oldLeadId = project.projectLeadId;
+        let oldLeadUser: LeadUserInfo | null = null;
+        if (oldLeadId) {
+            const lead = await this.prisma.user.findUnique({
+                where: { id: oldLeadId },
+                select: { email: true, firstName: true, lastName: true }
+            });
+            oldLeadUser = lead;
+        }
+
         const newLeadId = updateDto.projectLeadId;
+        let newLeadUser: LeadUserInfo | null = null;
         const leadChanged = newLeadId && newLeadId !== oldLeadId;
 
         // Validate new project lead
         if (newLeadId) {
             const lead = await this.prisma.user.findFirst({
                 where: { id: newLeadId, companyId, isActive: true },
+                select: { email: true, firstName: true, lastName: true }
             });
             if (!lead) {
                 throw new BadRequestException('Project lead not found or inactive');
             }
+            newLeadUser = lead;
         }
 
         await this.prisma.$transaction(async (prisma) => {
@@ -512,11 +609,11 @@ export class ProjectsService {
                 // Add/promote new lead
                 await prisma.projectMember.upsert({
                     where: {
-                        projectId_userId: { projectId: id, userId: newLeadId! },
+                        projectId_userId: { projectId: id, userId: newLeadId },
                     },
                     create: {
                         projectId: id,
-                        userId: newLeadId!,
+                        userId: newLeadId,
                         role: ProjectMemberRole.LEAD,
                     },
                     update: { role: ProjectMemberRole.LEAD },
@@ -524,14 +621,81 @@ export class ProjectsService {
             }
         });
 
-        // ============================================
-        // SEND NOTIFICATIONS
-        // ============================================
+        // 🔥 SEND EMAIL NOTIFICATIONS FOR LEAD CHANGE
+        if (leadChanged) {
+            // Email to new lead
+            if (newLeadUser && newLeadUser.email && newLeadId !== currentUserId) {
+                try {
+                    await this.emailService.sendProjectLeadAssignmentEmail(
+                        newLeadUser.email,
+                        newLeadUser.firstName,
+                        project.name,
+                        project.departments?.[0]?.department?.name || 'Unknown Department'
+                    );
+                } catch (error) {
+                    this.logger.error(`Failed to send project lead assignment email to ${newLeadUser.email}:`, error);
+                }
+            }
 
+            // Email to old lead about demotion
+            if (oldLeadUser && oldLeadUser.email && oldLeadId !== currentUserId) {
+                try {
+                    await this.emailService.sendTemplatedEmail(
+                        EmailType.ROLE_CHANGED,
+                        oldLeadUser.email,
+                        {
+                            recipientName: oldLeadUser.firstName,
+                            oldRole: 'Project Lead',
+                            newRole: 'Team Member',
+                            isPromotion: false,
+                            changedBy: changedBy
+                        }
+                    );
+                } catch (error) {
+                    this.logger.error(`Failed to send role change email to ${oldLeadUser.email}:`, error);
+                }
+            }
+        }
+
+        // 🔥 SEND EMAIL FOR STATUS CHANGE
+        if (updateDto.status && updateDto.status !== project.status) {
+            try {
+                // Get all member emails
+                const members = await this.prisma.projectMember.findMany({
+                    where: { projectId: id },
+                    include: {
+                        user: {
+                            select: { email: true, firstName: true }
+                        }
+                    }
+                });
+
+                // Send email to all members except the one who made the change
+                for (const member of members) {
+                    if (member.user.email && member.userId !== currentUserId) {
+                        await this.emailService.sendTemplatedEmail(
+                            EmailType.PROJECT_STATUS_CHANGED,
+                            member.user.email,
+                            {
+                                recipientName: member.user.firstName,
+                                projectName: project.name,
+                                oldStatus: project.status,
+                                newStatus: updateDto.status,
+                                changedBy: changedBy
+                            }
+                        );
+                    }
+                }
+            } catch (error) {
+                this.logger.error(`Failed to send project status change emails:`, error);
+            }
+        }
+
+        // In-app notifications
         // Notify new project lead
-        if (leadChanged && newLeadId !== currentUserId) {
+        if (leadChanged && newLeadId && newLeadId !== currentUserId) {
             await this.sendNotification(
-                newLeadId!,
+                newLeadId,
                 NotificationType.ROLE_CHANGE,
                 'You are now Project Lead',
                 `You have been assigned as the lead for project "${project.name}".`,
@@ -591,12 +755,47 @@ export class ProjectsService {
 
         const project = await this.findOne(id, companyId);
 
-        // Get all member IDs for notification
-        const memberIds = project.members?.map((m: any) => m.userId) || [];
+        // Get all member emails
+        const members = await this.prisma.projectMember.findMany({
+            where: { projectId: id },
+            include: {
+                user: {
+                    select: { email: true, firstName: true }
+                }
+            }
+        });
+
+        // Get company admin info
+        const admin = await this.prisma.user.findFirst({
+            where: { companyId, role: UserRole.COMPANY },
+            select: { firstName: true, lastName: true }
+        });
+        const deletedBy = admin ? `${admin.firstName} ${admin.lastName}` : 'Company Administrator';
 
         await this.prisma.project.delete({ where: { id } });
 
-        // Notify all members about project deletion
+        // 🔥 SEND PROJECT DELETED EMAILS
+        try {
+            for (const member of members) {
+                if (member.user.email) {
+                    await this.emailService.sendTemplatedEmail(
+                        EmailType.PROJECT_DELETED,
+                        member.user.email,
+                        {
+                            recipientName: member.user.firstName,
+                            projectName: project.name,
+                            deletedBy: deletedBy,
+                            deletionDate: new Date().toLocaleDateString()
+                        }
+                    );
+                }
+            }
+        } catch (error) {
+            this.logger.error(`Failed to send project deletion emails:`, error);
+        }
+
+        // In-app notifications
+        const memberIds = members.map(m => m.userId);
         await this.sendBulkNotifications(
             memberIds,
             NotificationType.SYSTEM,
@@ -624,6 +823,7 @@ export class ProjectsService {
 
         const users = await this.prisma.user.findMany({
             where: { id: { in: dto.userIds }, companyId, isActive: true },
+            select: { id: true, email: true, firstName: true, lastName: true }
         });
 
         if (users.length !== dto.userIds.length) {
@@ -632,7 +832,7 @@ export class ProjectsService {
 
         // Get existing members to avoid duplicate notifications
         const existingMemberIds = project.members?.map((m: any) => m.userId) || [];
-        const newMemberIds = dto.userIds.filter(id => !existingMemberIds.includes(id));
+        const newMembers = users.filter(user => !existingMemberIds.includes(user.id));
 
         await this.prisma.projectMember.createMany({
             data: dto.userIds.map((userId) => ({
@@ -646,8 +846,36 @@ export class ProjectsService {
         // Get department name for notification
         const departmentName = project.departments?.[0]?.department?.name || 'Unknown';
 
-        // Notify new members
-        const membersToNotify = newMemberIds.filter(memberId => memberId !== currentUserId);
+        // Get who added the members
+        const addedByUser = await this.prisma.user.findUnique({
+            where: { id: currentUserId },
+            select: { firstName: true, lastName: true }
+        });
+        const addedBy = addedByUser ? `${addedByUser.firstName} ${addedByUser.lastName}` : 'Team Lead';
+
+        // 🔥 SEND EMAILS TO NEW MEMBERS
+        try {
+            for (const member of newMembers) {
+                if (member.email && member.id !== currentUserId) {
+                    await this.emailService.sendProjectAssignmentEmail(
+                        member.email,
+                        member.firstName,
+                        project.name,
+                        departmentName,
+                        'Team Member',
+                        addedBy
+                    );
+                }
+            }
+        } catch (error) {
+            this.logger.error(`Failed to send project assignment emails:`, error);
+        }
+
+        // In-app notifications
+        const membersToNotify = newMembers
+            .map(m => m.id)
+            .filter(memberId => memberId !== currentUserId);
+
         await this.sendBulkNotifications(
             membersToNotify,
             NotificationType.PROJECT_ASSIGNMENT,
@@ -680,11 +908,37 @@ export class ProjectsService {
             throw new BadRequestException('Cannot remove project lead. Assign a new lead first.');
         }
 
+        // Get user info for emails before removing
+        const usersToRemove = await this.prisma.user.findMany({
+            where: { id: { in: dto.userIds }, companyId },
+            select: { id: true, email: true, firstName: true }
+        });
+
         await this.prisma.projectMember.deleteMany({
             where: { projectId: id, userId: { in: dto.userIds } },
         });
 
-        // Notify removed members
+        // 🔥 SEND EMAILS TO REMOVED MEMBERS
+        try {
+            for (const user of usersToRemove) {
+                if (user.email && user.id !== currentUserId) {
+                    await this.emailService.sendTemplatedEmail(
+                        EmailType.PROJECT_DELETED,
+                        user.email,
+                        {
+                            recipientName: user.firstName,
+                            projectName: project.name,
+                            action: 'removed from',
+                            reason: 'removed by project administrator'
+                        }
+                    );
+                }
+            }
+        } catch (error) {
+            this.logger.error(`Failed to send removal emails:`, error);
+        }
+
+        // In-app notifications
         const membersToNotify = dto.userIds.filter(memberId => memberId !== currentUserId);
         await this.sendBulkNotifications(
             membersToNotify,
@@ -713,7 +967,16 @@ export class ProjectsService {
 
         const member = await this.prisma.projectMember.findUnique({
             where: { projectId_userId: { projectId: id, userId: dto.userId } },
-            include: { user: { select: { firstName: true, lastName: true } } },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        email: true
+                    }
+                }
+            },
         });
 
         if (!member) {
@@ -745,28 +1008,59 @@ export class ProjectsService {
             });
         });
 
-        // ============================================
-        // SEND NOTIFICATIONS
-        // ============================================
+        // Get current user info for email
+        const changedByUser = await this.prisma.user.findUnique({
+            where: { id: currentUserId },
+            select: { firstName: true, lastName: true }
+        });
+        const changedBy = changedByUser ? `${changedByUser.firstName} ${changedByUser.lastName}` : 'System';
 
-        // Notify the user about role change
-        if (dto.userId !== currentUserId) {
-            await this.sendNotification(
-                dto.userId,
-                NotificationType.ROLE_CHANGE,
-                'Project Role Updated',
-                `Your role in project "${project.name}" has been changed to ${dto.role.replace('_', ' ')}.`,
-                {
-                    projectId: id,
-                    projectName: project.name,
-                    oldRole,
-                    newRole: dto.role,
-                }
-            );
+        // 🔥 SEND EMAIL FOR ROLE CHANGE
+        if (member.user.email && dto.userId !== currentUserId) {
+            try {
+                await this.emailService.sendTemplatedEmail(
+                    EmailType.ROLE_CHANGED,
+                    member.user.email,
+                    {
+                        recipientName: member.user.firstName,
+                        oldRole: this.formatRole(oldRole),
+                        newRole: this.formatRole(dto.role),
+                        isPromotion: dto.role === ProjectMemberRole.LEAD,
+                        changedBy: changedBy
+                    }
+                );
+            } catch (error) {
+                this.logger.error(`Failed to send role change email to ${member.user.email}:`, error);
+            }
         }
 
         // If new lead, notify old lead
         if (dto.role === ProjectMemberRole.LEAD && project.projectLeadId && project.projectLeadId !== currentUserId) {
+            const oldLead = await this.prisma.user.findUnique({
+                where: { id: project.projectLeadId },
+                select: { email: true, firstName: true }
+            });
+
+            if (oldLead && oldLead.email) {
+                try {
+                    await this.emailService.sendTemplatedEmail(
+                        EmailType.ROLE_CHANGED,
+                        oldLead.email,
+                        {
+                            recipientName: oldLead.firstName,
+                            oldRole: 'Project Lead',
+                            newRole: 'Team Member',
+                            isPromotion: false,
+                            changedBy: changedBy,
+                            newLeadName: `${member.user.firstName} ${member.user.lastName}`
+                        }
+                    );
+                } catch (error) {
+                    this.logger.error(`Failed to send demotion email to ${oldLead.email}:`, error);
+                }
+            }
+
+            // In-app notification for old lead
             await this.sendNotification(
                 project.projectLeadId,
                 NotificationType.ROLE_CHANGE,
@@ -777,6 +1071,22 @@ export class ProjectsService {
                     projectName: project.name,
                     newRole: 'MEMBER',
                     newLeadId: dto.userId,
+                }
+            );
+        }
+
+        // In-app notification for the user
+        if (dto.userId !== currentUserId) {
+            await this.sendNotification(
+                dto.userId,
+                NotificationType.ROLE_CHANGE,
+                'Project Role Updated',
+                `Your role in project "${project.name}" has been changed to ${this.formatRole(dto.role)}.`,
+                {
+                    projectId: id,
+                    projectName: project.name,
+                    oldRole: this.formatRole(oldRole),
+                    newRole: this.formatRole(dto.role),
                 }
             );
         }
@@ -843,5 +1153,21 @@ export class ProjectsService {
             totalTimeTrackedMinutes,
             totalTimeTrackedHours,
         };
+    }
+
+    // ============================================
+    // HELPER: Format role for display
+    // ============================================
+    private formatRole(role: ProjectMemberRole): string {
+        switch (role) {
+            case ProjectMemberRole.LEAD:
+                return 'Project Lead';
+            case ProjectMemberRole.MEMBER:
+                return 'Team Member';
+            case (ProjectMemberRole as any).VIEWER:
+                return 'Viewer';
+            default:
+                return role.replace('_', ' ');
+        }
     }
 }

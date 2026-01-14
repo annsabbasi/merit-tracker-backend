@@ -11,10 +11,14 @@ import {
     UnlinkProjectsDto,
     DepartmentQueryDto
 } from './dto/departments.dto';
+import { EmailService } from '../email/email.service';
+import { EmailType } from '../email/interfaces/email.interface';
 
 @Injectable()
 export class DepartmentsService {
-    constructor(private prisma: PrismaService) { }
+    constructor(private prisma: PrismaService,
+        private emailService: EmailService,
+    ) { }
 
     // Helper function to convert date string to proper DateTime
     private toDateTime(dateString?: string): Date | undefined {
@@ -26,9 +30,9 @@ export class DepartmentsService {
     }
 
     /**
-     * Create a new department
-     * Only COMPANY can create departments
-     */
+        * Create a new department
+        * Only COMPANY can create departments
+        */
     async create(createDto: CreateDepartmentDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         // Only company admin can create departments
         if (currentUserRole !== UserRole.COMPANY) {
@@ -47,6 +51,12 @@ export class DepartmentsService {
             }
         }
 
+        // Get company info for emails
+        const company = await this.prisma.company.findUnique({
+            where: { id: companyId },
+            select: { name: true }
+        });
+
         // Use transaction for atomic operation
         const result = await this.prisma.$transaction(async (prisma) => {
             // Create the department
@@ -63,7 +73,8 @@ export class DepartmentsService {
             if (memberIds && memberIds.length > 0) {
                 // Verify all users exist in company
                 const users = await prisma.user.findMany({
-                    where: { id: { in: memberIds }, companyId }
+                    where: { id: { in: memberIds }, companyId },
+                    select: { id: true, email: true, firstName: true }
                 });
                 if (users.length !== memberIds.length) {
                     throw new BadRequestException('Some users not found in company');
@@ -84,6 +95,19 @@ export class DepartmentsService {
                         metadata: { departmentId: department.id, departmentName: department.name }
                     }))
                 });
+
+                // 🔥 SEND EMAILS TO ASSIGNED MEMBERS
+                try {
+                    for (const user of users) {
+                        await this.emailService.sendDepartmentAssignmentEmail(
+                            user.email,
+                            user.firstName,
+                            department.name
+                        );
+                    }
+                } catch (error) {
+                    console.error('Failed to send department assignment emails:', error);
+                }
             }
 
             // Link projects if provided
@@ -108,6 +132,11 @@ export class DepartmentsService {
 
             // Assign lead to department as member if not already
             if (createDto.leadId) {
+                const leadUser = await prisma.user.findUnique({
+                    where: { id: createDto.leadId },
+                    select: { email: true, firstName: true }
+                });
+
                 await prisma.user.update({
                     where: { id: createDto.leadId },
                     data: { departmentId: department.id }
@@ -123,6 +152,19 @@ export class DepartmentsService {
                         metadata: { departmentId: department.id, departmentName: department.name, role: 'HEAD' }
                     }
                 });
+
+                // 🔥 SEND EMAIL TO DEPARTMENT HEAD
+                try {
+                    if (leadUser) {
+                        await this.emailService.sendDepartmentHeadAssignmentEmail(
+                            leadUser.email,
+                            leadUser.firstName,
+                            department.name
+                        );
+                    }
+                } catch (error) {
+                    console.error('Failed to send department head assignment email:', error);
+                }
             }
 
             return department;
@@ -130,6 +172,7 @@ export class DepartmentsService {
 
         return this.findOne(result.id, companyId);
     }
+
 
     /**
      * Get all departments with stats
@@ -389,9 +432,8 @@ export class DepartmentsService {
     }
 
     /**
-     * Update department
-     * Only COMPANY can update
-     */
+       * Update department - Add email for lead change
+       */
     async update(id: string, updateDto: UpdateDepartmentDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can update departments');
@@ -414,7 +456,8 @@ export class DepartmentsService {
         // If changing lead, validate and notify
         if (updateDto.leadId && updateDto.leadId !== department.leadId) {
             const newLead = await this.prisma.user.findFirst({
-                where: { id: updateDto.leadId, companyId, isActive: true }
+                where: { id: updateDto.leadId, companyId, isActive: true },
+                select: { id: true, email: true, firstName: true }
             });
             if (!newLead) {
                 throw new BadRequestException('New department lead not found');
@@ -436,6 +479,17 @@ export class DepartmentsService {
                     metadata: { departmentId: id, departmentName: department.name, role: 'HEAD' }
                 }
             });
+
+            // 🔥 SEND EMAIL TO NEW DEPARTMENT HEAD
+            try {
+                await this.emailService.sendDepartmentHeadAssignmentEmail(
+                    newLead.email,
+                    newLead.firstName,
+                    department.name
+                );
+            } catch (error) {
+                console.error('Failed to send department head assignment email:', error);
+            }
         }
 
         await this.prisma.department.update({
@@ -446,9 +500,10 @@ export class DepartmentsService {
         return this.findOne(id, companyId);
     }
 
+
     /**
-     * Assign users to department
-     */
+         * Assign users to department
+         */
     async assignUsers(id: string, dto: AssignUsersDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can assign users to departments');
@@ -456,9 +511,10 @@ export class DepartmentsService {
 
         const department = await this.findOne(id, companyId);
 
-        // Verify all users exist in company
+        // Verify all users exist in company and get their info
         const users = await this.prisma.user.findMany({
-            where: { id: { in: dto.userIds }, companyId }
+            where: { id: { in: dto.userIds }, companyId },
+            select: { id: true, email: true, firstName: true }
         });
         if (users.length !== dto.userIds.length) {
             throw new BadRequestException('Some users not found in company');
@@ -481,12 +537,26 @@ export class DepartmentsService {
             }))
         });
 
+        // 🔥 SEND EMAILS TO ASSIGNED MEMBERS
+        try {
+            for (const user of users) {
+                await this.emailService.sendDepartmentAssignmentEmail(
+                    user.email,
+                    user.firstName,
+                    department.name
+                );
+            }
+        } catch (error) {
+            console.error('Failed to send department assignment emails:', error);
+        }
+
         return this.findOne(id, companyId);
     }
 
+
     /**
-     * Remove users from department
-     */
+         * Remove users from department
+         */
     async removeUsers(id: string, dto: RemoveUsersDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can remove users from departments');
@@ -499,6 +569,16 @@ export class DepartmentsService {
             throw new BadRequestException('Cannot remove department head. Please assign a new head first.');
         }
 
+        // Get user info for emails
+        const usersToRemove = await this.prisma.user.findMany({
+            where: {
+                id: { in: dto.userIds },
+                departmentId: id,
+                companyId
+            },
+            select: { id: true, email: true, firstName: true }
+        });
+
         // Remove users from department
         await this.prisma.user.updateMany({
             where: {
@@ -509,8 +589,25 @@ export class DepartmentsService {
             data: { departmentId: null }
         });
 
+        // 🔥 SEND EMAILS TO REMOVED USERS
+        try {
+            for (const user of usersToRemove) {
+                await this.emailService.sendTemplatedEmail(
+                    EmailType.DEPARTMENT_REMOVED,
+                    user.email,
+                    {
+                        recipientName: user.firstName,
+                        departmentName: department.name
+                    }
+                );
+            }
+        } catch (error) {
+            console.error('Failed to send department removal emails:', error);
+        }
+
         return this.findOne(id, companyId);
     }
+
 
     /**
      * Link projects to department
@@ -637,9 +734,8 @@ export class DepartmentsService {
     }
 
     /**
-     * Delete department
-     * Only COMPANY can delete
-     */
+      * Delete department - Notify all members
+      */
     async delete(id: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can delete departments');
@@ -647,11 +743,33 @@ export class DepartmentsService {
 
         const department = await this.findOne(id, companyId);
 
+        // Get all department members for email notifications
+        const departmentMembers = await this.prisma.user.findMany({
+            where: { departmentId: id },
+            select: { id: true, email: true, firstName: true }
+        });
+
         // Remove all users from department before deleting
         await this.prisma.user.updateMany({
             where: { departmentId: id },
             data: { departmentId: null }
         });
+
+        // 🔥 SEND EMAILS TO ALL MEMBERS ABOUT DEPARTMENT DELETION
+        try {
+            for (const member of departmentMembers) {
+                await this.emailService.sendTemplatedEmail(
+                    EmailType.DEPARTMENT_REMOVED,
+                    member.email,
+                    {
+                        recipientName: member.firstName,
+                        departmentName: department.name
+                    }
+                );
+            }
+        } catch (error) {
+            console.error('Failed to send department deletion emails:', error);
+        }
 
         // Delete department (cascade will remove department_projects)
         await this.prisma.department.delete({
