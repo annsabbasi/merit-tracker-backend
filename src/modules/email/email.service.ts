@@ -33,6 +33,7 @@ export class EmailService implements OnModuleInit {
     private async initializeTransporter() {
         const host = this.configService.get<string>('SMTP_HOST');
         const port = this.configService.get<number>('SMTP_PORT', 587);
+        // const port = this.configService.get<number>(587);
         const user = this.configService.get<string>('SMTP_USER');
         const pass = this.configService.get<string>('SMTP_PASS');
         const secure = this.configService.get<boolean>('SMTP_SECURE', false);
