@@ -100,6 +100,18 @@ export class EmailService implements OnModuleInit {
     }
 
     /**
+     * Send password changed notification email
+     */
+    async sendPasswordChangedEmail(
+        email: string,
+        firstName: string
+    ): Promise<boolean> {
+        return this.sendTemplatedEmail(EmailType.PASSWORD_CHANGED, email, {
+            recipientName: firstName,
+        });
+    }
+
+    /**
      * Send a templated email
      */
     async sendTemplatedEmail(

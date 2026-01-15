@@ -86,4 +86,6 @@ export enum EmailType {
     TRIAL_ENDING_SOON = 'trial_ending_soon',
     TRIAL_EXPIRED = 'trial_expired',
     SUBSCRIPTION_EXPIRED = 'subscription_expired',
+
+    PASSWORD_CHANGED = 'password_changed',
 }

@@ -1,10 +1,9 @@
 // src/app.module.ts
-// UPDATED VERSION - Removed SupabaseModule (use StorageModule instead)
+// UPDATED VERSION - Added ProfileModule
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
-// REMOVED: import { SupabaseModule } from './supabase/supabase.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CompaniesModule } from './modules/companies/companies.module';
@@ -24,13 +23,14 @@ import { DesktopAgentModule } from './modules/desktop-agent/desktop-agent.module
 import { ScheduledTasksModule } from './modules/scheduled-tasks/scheduled-tasks.module';
 import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
 import { EmailModule } from './modules/email/email.module';
+// NEW: Profile Module
+import { ProfileModule } from './modules/profile/profile.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
-    // REMOVED: SupabaseModule - Use StorageModule instead
-    StorageModule,  // This handles all Supabase storage operations
+    StorageModule,
     EmailModule,
     AuthModule,
     UsersModule,
@@ -50,6 +50,8 @@ import { EmailModule } from './modules/email/email.module';
     ScheduledTasksModule,
     // Leaderboard and performance tracking
     LeaderboardModule,
+    // NEW: User Profile module
+    ProfileModule,
   ],
   providers: [
     {

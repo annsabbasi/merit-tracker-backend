@@ -68,6 +68,7 @@ export class EmailTemplateService {
             [EmailType.TRIAL_ENDING_SOON]: () => this.trialEndingSoonTemplate(context),
             [EmailType.TRIAL_EXPIRED]: () => this.trialExpiredTemplate(context),
             [EmailType.SUBSCRIPTION_EXPIRED]: () => this.subscriptionExpiredTemplate(context),
+            [EmailType.PASSWORD_CHANGED]: () => this.passwordChangedTemplate(context),
         };
 
         return templates[type]();
@@ -1102,4 +1103,186 @@ export class EmailTemplateService {
             html: this.wrapInBaseTemplate(content, ctx),
         };
     }
+
+    // In your EmailTemplateService class, add this method:
+
+    private passwordChangedTemplate(ctx: EmailContext): { subject: string; html: string } {
+        const content = `
+    <h2 style="margin: 0 0 20px 0; color: ${this.textColor}; font-size: 24px;">
+      Password Changed Successfully 🔐
+    </h2>
+    <p style="margin: 0 0 15px 0; color: ${this.textColor}; font-size: 16px; line-height: 1.6;">
+      Hi ${ctx.recipientName}, your password has been successfully updated.
+    </p>
+    
+    <p style="margin: 0 0 15px 0; color: ${this.textColor}; font-size: 16px; line-height: 1.6;">
+      This change was completed at ${new Date().toLocaleString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZoneName: 'short'
+        })}.
+    </p>
+    
+    ${this.createSuccessBox('Your password has been updated successfully.')}
+    
+    <div style="margin: 20px 0; padding: 16px; background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 0 8px 8px 0;">
+      <p style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: #92400e;">⚠️ Security Notice</p>
+      <p style="margin: 0; color: #92400e; font-size: 14px;">
+        If you didn't make this change, please contact your administrator or our support team immediately.
+      </p>
+    </div>
+    
+    <p style="margin: 20px 0 15px 0; color: ${this.textColor}; font-size: 16px; line-height: 1.6;">
+      For your security:
+    </p>
+    <ul style="margin: 0 0 20px 0; padding-left: 20px; color: ${this.textColor}; font-size: 15px; line-height: 1.8;">
+      <li>Use a unique password for your Merit Tracker account</li>
+      <li>Never share your password with anyone</li>
+      <li>Enable two-factor authentication if available</li>
+    </ul>
+    
+    <p style="margin: 20px 0 0 0; color: ${this.mutedTextColor}; font-size: 14px;">
+      This is an automated security notification. You can update your password anytime from your account settings.
+    </p>`;
+
+        return {
+            subject: 'Password Changed Successfully - Merit Tracker',
+            html: this.wrapInBaseTemplate(content, ctx),
+        };
+    }
 }
+
+
+// src/modules/email/templates/password-changed.template.ts
+// Add this method to your existing EmailService class
+
+/*
+Add this method to your existing email.service.ts file:
+
+async sendPasswordChangedEmail(email: string, firstName: string): Promise<void> {
+  const subject = 'Password Changed Successfully - Merit Tracker';
+  
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Password Changed</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+          line-height: 1.6;
+          color: #333;
+          margin: 0;
+          padding: 0;
+          background-color: #f5f5f5;
+        }
+        .container {
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+        }
+        .card {
+          background: white;
+          border-radius: 8px;
+          padding: 40px;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+          text-align: center;
+          margin-bottom: 30px;
+        }
+        .logo {
+          font-size: 24px;
+          font-weight: bold;
+          color: #2563eb;
+        }
+        h1 {
+          color: #1f2937;
+          font-size: 24px;
+          margin-bottom: 20px;
+        }
+        p {
+          color: #4b5563;
+          margin-bottom: 16px;
+        }
+        .alert-box {
+          background-color: #fef3c7;
+          border-left: 4px solid #f59e0b;
+          padding: 16px;
+          border-radius: 0 8px 8px 0;
+          margin: 24px 0;
+        }
+        .alert-box p {
+          margin: 0;
+          color: #92400e;
+        }
+        .footer {
+          text-align: center;
+          margin-top: 30px;
+          padding-top: 20px;
+          border-top: 1px solid #e5e7eb;
+          color: #9ca3af;
+          font-size: 14px;
+        }
+        .timestamp {
+          color: #6b7280;
+          font-size: 14px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="card">
+          <div class="header">
+            <div class="logo">Merit Tracker</div>
+          </div>
+          
+          <h1>Password Changed</h1>
+          
+          <p>Hi ${firstName},</p>
+          
+          <p>Your Merit Tracker account password was successfully changed.</p>
+          
+          <p class="timestamp">
+            <strong>When:</strong> ${new Date().toLocaleString('en-US', { 
+              weekday: 'long', 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              timeZoneName: 'short'
+            })}
+          </p>
+          
+          <div class="alert-box">
+            <p><strong>⚠️ Didn't make this change?</strong></p>
+            <p>If you did not change your password, your account may be compromised. Please contact your administrator or our support team immediately.</p>
+          </div>
+          
+          <p>For your security, we recommend:</p>
+          <ul>
+            <li>Using a unique password for your Merit Tracker account</li>
+            <li>Never sharing your password with anyone</li>
+            <li>Enabling two-factor authentication if available</li>
+          </ul>
+          
+          <div class="footer">
+            <p>This is an automated security notification from Merit Tracker.</p>
+            <p>© ${new Date().getFullYear()} Merit Tracker. All rights reserved.</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  await this.sendEmail(email, subject, html);
+}
+*/
