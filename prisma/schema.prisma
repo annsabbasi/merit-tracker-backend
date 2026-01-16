@@ -8,26 +8,28 @@ datasource db {
 }
 
 model Company {
-  id                   String             @id @default(uuid())
-  name                 String             @unique
-  companyCode          String             @unique
-  logo                 String?
-  address              String?
-  phone                String?
-  website              String?
-  subscriptionStatus   SubscriptionStatus @default(TRIAL)
-  trialEndsAt          DateTime?
-  subscriptionEndsAt   DateTime?
-  isActive             Boolean            @default(true)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  id                 String             @id @default(uuid())
+  name               String             @unique
+  companyCode        String             @unique
+  logo               String?
+  address            String?
+  phone              String?
+  website            String?
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  trialEndsAt        DateTime?
+  subscriptionEndsAt DateTime?
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  // NEW: Track if company name has been changed
+  nameChangedAt      DateTime? // null means name can still be changed once
+
   activityLogs         ActivityLog[]
   departments          Department[]
   projects             Project[]
   sops                 Sop[]
   users                User[]
-  // Screen capture settings at company level
-  screenCaptureEnabled Boolean            @default(true) // Master toggle for company
+  screenCaptureEnabled Boolean       @default(true)
 
   @@map("companies")
 }
@@ -93,6 +95,7 @@ model Department {
   name        String
   description String?
   tag         String?
+  logo        String? // NEW: Department logo URL
   companyId   String
   leadId      String?
   startDate   DateTime?

@@ -13,11 +13,14 @@ import {
 } from './dto/departments.dto';
 import { EmailService } from '../email/email.service';
 import { EmailType } from '../email/interfaces/email.interface';
+import { StorageService } from '../storage/storage.service';
 
 @Injectable()
 export class DepartmentsService {
-    constructor(private prisma: PrismaService,
+    constructor(
+        private prisma: PrismaService,
         private emailService: EmailService,
+        private storageService: StorageService,
     ) { }
 
     // Helper function to convert date string to proper DateTime
@@ -30,16 +33,16 @@ export class DepartmentsService {
     }
 
     /**
-        * Create a new department
-        * Only COMPANY can create departments
-        */
+     * Create a new department
+     * Only COMPANY can create departments
+     */
     async create(createDto: CreateDepartmentDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         // Only company admin can create departments
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can create departments');
         }
 
-        const { memberIds, projectIds, startDate, endDate, ...departmentData } = createDto;
+        const { memberIds, projectIds, startDate, endDate, logo, ...departmentData } = createDto;
 
         // Validate lead exists if provided
         if (createDto.leadId) {
@@ -59,11 +62,12 @@ export class DepartmentsService {
 
         // Use transaction for atomic operation
         const result = await this.prisma.$transaction(async (prisma) => {
-            // Create the department
+            // Create the department with logo if provided
             const department = await prisma.department.create({
                 data: {
                     ...departmentData,
                     companyId,
+                    logo: logo || null, // Include logo in creation
                     startDate: this.toDateTime(startDate),
                     endDate: this.toDateTime(endDate),
                 },
@@ -96,7 +100,7 @@ export class DepartmentsService {
                     }))
                 });
 
-                // 🔥 SEND EMAILS TO ASSIGNED MEMBERS
+                // Send emails to assigned members
                 try {
                     for (const user of users) {
                         await this.emailService.sendDepartmentAssignmentEmail(
@@ -153,7 +157,7 @@ export class DepartmentsService {
                     }
                 });
 
-                // 🔥 SEND EMAIL TO DEPARTMENT HEAD
+                // Send email to department head
                 try {
                     if (leadUser) {
                         await this.emailService.sendDepartmentHeadAssignmentEmail(
@@ -172,7 +176,6 @@ export class DepartmentsService {
 
         return this.findOne(result.id, companyId);
     }
-
 
     /**
      * Get all departments with stats
@@ -432,8 +435,8 @@ export class DepartmentsService {
     }
 
     /**
-       * Update department - Add email for lead change
-       */
+     * Update department - with logo support
+     */
     async update(id: string, updateDto: UpdateDepartmentDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can update departments');
@@ -441,9 +444,25 @@ export class DepartmentsService {
 
         const department = await this.findOne(id, companyId);
 
-        const { startDate, endDate, ...restData } = updateDto;
+        const { startDate, endDate, logo, ...restData } = updateDto;
 
         const updateData: any = { ...restData };
+
+        // Handle logo update
+        if (logo !== undefined) {
+            // If new logo is provided and old logo exists, delete old logo
+            if (department.logo && logo !== department.logo) {
+                try {
+                    const oldPath = this.storageService.extractPathFromUrl(department.logo);
+                    if (oldPath) {
+                        await this.storageService.deleteFile(oldPath);
+                    }
+                } catch (error) {
+                    console.error('Failed to delete old department logo:', error);
+                }
+            }
+            updateData.logo = logo || null;
+        }
 
         if (startDate !== undefined) {
             updateData.startDate = startDate ? this.toDateTime(startDate) : null;
@@ -480,7 +499,7 @@ export class DepartmentsService {
                 }
             });
 
-            // 🔥 SEND EMAIL TO NEW DEPARTMENT HEAD
+            // Send email to new department head
             try {
                 await this.emailService.sendDepartmentHeadAssignmentEmail(
                     newLead.email,
@@ -500,10 +519,101 @@ export class DepartmentsService {
         return this.findOne(id, companyId);
     }
 
+    /**
+     * Upload department logo
+     */
+    async uploadLogo(
+        id: string,
+        file: Express.Multer.File,
+        currentUserRole: UserRole,
+        companyId: string
+    ) {
+        if (currentUserRole !== UserRole.COMPANY) {
+            throw new ForbiddenException('Only company admin can update department logo');
+        }
+
+        const department = await this.prisma.department.findFirst({
+            where: { id, companyId },
+            select: { id: true, name: true, logo: true }
+        });
+
+        if (!department) {
+            throw new NotFoundException('Department not found');
+        }
+
+        // Delete old logo if exists
+        if (department.logo) {
+            try {
+                const oldPath = this.storageService.extractPathFromUrl(department.logo);
+                if (oldPath) {
+                    await this.storageService.deleteFile(oldPath);
+                }
+            } catch (error) {
+                console.error('Failed to delete old department logo:', error);
+            }
+        }
+
+        // Upload new logo
+        const uploadResult = await this.storageService.uploadFile(
+            file,
+            companyId,
+            'departments/logos',
+            {
+                maxSizeMB: 5,
+                allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'],
+            }
+        );
+
+        await this.prisma.department.update({
+            where: { id },
+            data: { logo: uploadResult.url }
+        });
+
+        return this.findOne(id, companyId);
+    }
 
     /**
-         * Assign users to department
-         */
+     * Remove department logo
+     */
+    async removeLogo(id: string, currentUserRole: UserRole, companyId: string) {
+        if (currentUserRole !== UserRole.COMPANY) {
+            throw new ForbiddenException('Only company admin can remove department logo');
+        }
+
+        const department = await this.prisma.department.findFirst({
+            where: { id, companyId },
+            select: { id: true, name: true, logo: true }
+        });
+
+        if (!department) {
+            throw new NotFoundException('Department not found');
+        }
+
+        if (!department.logo) {
+            throw new BadRequestException('Department does not have a logo to remove');
+        }
+
+        // Delete logo from storage
+        try {
+            const logoPath = this.storageService.extractPathFromUrl(department.logo);
+            if (logoPath) {
+                await this.storageService.deleteFile(logoPath);
+            }
+        } catch (error) {
+            console.error('Failed to delete department logo from storage:', error);
+        }
+
+        await this.prisma.department.update({
+            where: { id },
+            data: { logo: null }
+        });
+
+        return this.findOne(id, companyId);
+    }
+
+    /**
+     * Assign users to department
+     */
     async assignUsers(id: string, dto: AssignUsersDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can assign users to departments');
@@ -537,7 +647,7 @@ export class DepartmentsService {
             }))
         });
 
-        // 🔥 SEND EMAILS TO ASSIGNED MEMBERS
+        // Send emails to assigned members
         try {
             for (const user of users) {
                 await this.emailService.sendDepartmentAssignmentEmail(
@@ -553,10 +663,9 @@ export class DepartmentsService {
         return this.findOne(id, companyId);
     }
 
-
     /**
-         * Remove users from department
-         */
+     * Remove users from department
+     */
     async removeUsers(id: string, dto: RemoveUsersDto, currentUserId: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can remove users from departments');
@@ -589,7 +698,7 @@ export class DepartmentsService {
             data: { departmentId: null }
         });
 
-        // 🔥 SEND EMAILS TO REMOVED USERS
+        // Send emails to removed users
         try {
             for (const user of usersToRemove) {
                 await this.emailService.sendTemplatedEmail(
@@ -607,7 +716,6 @@ export class DepartmentsService {
 
         return this.findOne(id, companyId);
     }
-
 
     /**
      * Link projects to department
@@ -734,8 +842,8 @@ export class DepartmentsService {
     }
 
     /**
-      * Delete department - Notify all members
-      */
+     * Delete department - Notify all members
+     */
     async delete(id: string, currentUserRole: UserRole, companyId: string) {
         if (currentUserRole !== UserRole.COMPANY) {
             throw new ForbiddenException('Only company admin can delete departments');
@@ -749,13 +857,25 @@ export class DepartmentsService {
             select: { id: true, email: true, firstName: true }
         });
 
+        // Delete logo from storage if exists
+        if (department.logo) {
+            try {
+                const logoPath = this.storageService.extractPathFromUrl(department.logo);
+                if (logoPath) {
+                    await this.storageService.deleteFile(logoPath);
+                }
+            } catch (error) {
+                console.error('Failed to delete department logo:', error);
+            }
+        }
+
         // Remove all users from department before deleting
         await this.prisma.user.updateMany({
             where: { departmentId: id },
             data: { departmentId: null }
         });
 
-        // 🔥 SEND EMAILS TO ALL MEMBERS ABOUT DEPARTMENT DELETION
+        // Send emails to all members about department deletion
         try {
             for (const member of departmentMembers) {
                 await this.emailService.sendTemplatedEmail(

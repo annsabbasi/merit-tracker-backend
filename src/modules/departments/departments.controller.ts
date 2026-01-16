@@ -1,6 +1,21 @@
 // src/modules/departments/departments.controller.ts
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Patch } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import {
+    Controller,
+    Get,
+    Post,
+    Put,
+    Delete,
+    Body,
+    Param,
+    Query,
+    UseGuards,
+    Patch,
+    UseInterceptors,
+    UploadedFile,
+    BadRequestException
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { DepartmentsService } from './departments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -95,6 +110,70 @@ export class DepartmentsController {
         return this.departmentsService.update(id, updateDto, currentUserId, currentUserRole as UserRole, companyId);
     }
 
+    // ============================================
+    // LOGO ENDPOINTS
+    // ============================================
+
+    @Post(':id/logo')
+    @UseGuards(RolesGuard)
+    @Roles(UserRole.COMPANY)
+    @ApiOperation({ summary: 'Upload or update department logo (Company Admin only)' })
+    @ApiConsumes('multipart/form-data')
+    @ApiBody({
+        schema: {
+            type: 'object',
+            properties: {
+                file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'Logo image file (JPEG, PNG, WebP, SVG - max 5MB)',
+                },
+            },
+        },
+    })
+    @UseInterceptors(
+        FileInterceptor('file', {
+            limits: {
+                fileSize: 5 * 1024 * 1024, // 5MB
+            },
+            fileFilter: (req, file, callback) => {
+                const allowedMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'];
+                if (allowedMimes.includes(file.mimetype)) {
+                    callback(null, true);
+                } else {
+                    callback(new BadRequestException('Only JPEG, PNG, WebP, and SVG images are allowed'), false);
+                }
+            },
+        })
+    )
+    async uploadLogo(
+        @Param('id') id: string,
+        @UploadedFile() file: Express.Multer.File,
+        @CurrentUser('role') currentUserRole: string,
+        @CurrentUser('companyId') companyId: string,
+    ) {
+        if (!file) {
+            throw new BadRequestException('Logo file is required');
+        }
+        return this.departmentsService.uploadLogo(id, file, currentUserRole as UserRole, companyId);
+    }
+
+    @Delete(':id/logo')
+    @UseGuards(RolesGuard)
+    @Roles(UserRole.COMPANY)
+    @ApiOperation({ summary: 'Remove department logo (Company Admin only)' })
+    async removeLogo(
+        @Param('id') id: string,
+        @CurrentUser('role') currentUserRole: string,
+        @CurrentUser('companyId') companyId: string,
+    ) {
+        return this.departmentsService.removeLogo(id, currentUserRole as UserRole, companyId);
+    }
+
+    // ============================================
+    // MEMBER MANAGEMENT ENDPOINTS
+    // ============================================
+
     @Patch(':id/assign-users')
     @UseGuards(RolesGuard)
     @Roles(UserRole.COMPANY)
@@ -122,6 +201,10 @@ export class DepartmentsController {
     ) {
         return this.departmentsService.removeUsers(id, dto, currentUserId, currentUserRole as UserRole, companyId);
     }
+
+    // ============================================
+    // PROJECT LINKING ENDPOINTS
+    // ============================================
 
     @Patch(':id/link-projects')
     @UseGuards(RolesGuard)
