@@ -85,6 +85,11 @@ model User {
   lastActiveDate             DateTime?
   oneTimeCodes               OneTimeCode[]
 
+  taskAssignments         TaskAssignee[] @relation("TaskAssignees")
+  tasksAssignedByMe       TaskAssignee[] @relation("TaskAssigner")
+  tasksSubmittedForReview Task[]         @relation("TaskSubmitter")
+  tasksReviewed           Task[]         @relation("TaskReviewer")
+
   @@index([companyId])
   @@index([email])
   @@map("users")
@@ -248,29 +253,68 @@ model SubProjectMember {
   @@map("sub_project_members")
 }
 
-// NEW: Task model - granular tasks within SubProjects
+// NEW: Task assignees junction table (multi-assignee support)
+model TaskAssignee {
+  id           String    @id @default(uuid())
+  taskId       String
+  userId       String
+  assignedAt   DateTime  @default(now())
+  assignedById String?
+  // Track individual completion status
+  isCompleted  Boolean   @default(false)
+  completedAt  DateTime?
+  // Relations
+  task         Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user         User      @relation("TaskAssignees", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy   User?     @relation("TaskAssigner", fields: [assignedById], references: [id])
+
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_assignees")
+}
+
+// UPDATE: Task model
 model Task {
-  id               String             @id @default(uuid())
+  id               String     @id @default(uuid())
   title            String
   description      String?
   subProjectId     String
+  // DEPRECATED: Keep for backward compatibility, use assignees relation instead
   assignedToId     String?
   createdById      String
-  status           TaskStatus         @default(TODO)
-  priority         Priority           @default(MEDIUM)
-  pointsValue      Int                @default(10) // Default points for completing task
+  status           TaskStatus @default(TODO)
+  priority         Priority   @default(MEDIUM)
+  pointsValue      Int        @default(10)
   estimatedMinutes Int?
-  actualMinutes    Int? // Calculated from time tracking
+  actualMinutes    Int?
   dueDate          DateTime?
   startedAt        DateTime?
   completedAt      DateTime?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  // NEW: Review workflow fields
+  submittedForReviewAt   DateTime?
+  submittedForReviewById String?
+  reviewedAt             DateTime?
+  reviewedById           String?
+  reviewStatus           ReviewStatus?
+  reviewNotes            String? // QC feedback/rejection reason
+  revisionCount          Int           @default(0)
+
+  // NEW: Points deduction on rejection (optional)
+  pointsDeducted Int @default(0)
+
   // Relations
-  subProject       SubProject         @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
-  assignedTo       User?              @relation("TaskAssignee", fields: [assignedToId], references: [id])
-  createdBy        User               @relation("TaskCreator", fields: [createdById], references: [id])
-  timeTrackings    TaskTimeTracking[]
+  subProject           SubProject         @relation(fields: [subProjectId], references: [id], onDelete: Cascade)
+  assignedTo           User?              @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  createdBy            User               @relation("TaskCreator", fields: [createdById], references: [id])
+  submittedForReviewBy User?              @relation("TaskSubmitter", fields: [submittedForReviewById], references: [id])
+  reviewedBy           User?              @relation("TaskReviewer", fields: [reviewedById], references: [id])
+  timeTrackings        TaskTimeTracking[]
+  // NEW: Multi-assignee relation
+  assignees            TaskAssignee[]
 
   @@index([subProjectId])
   @@index([assignedToId])
@@ -610,10 +654,18 @@ enum SubProjectMemberRole {
 enum TaskStatus {
   TODO
   IN_PROGRESS
-  IN_REVIEW
-  COMPLETED
+  IN_REVIEW // Submitted for QC review
+  NEEDS_REVISION // NEW: Rejected by QC, needs rework
+  COMPLETED // Approved by QC
   BLOCKED
   CANCELLED
+}
+
+// NEW: Review status enum
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 // NEW: Priority levels
@@ -665,6 +717,13 @@ enum NotificationType {
   LEADERBOARD_RANK_CHANGED
   ACHIEVEMENT_EARNED
   STREAK_MILESTONE
+
+  TASK_SUBMITTED_FOR_REVIEW
+  TASK_APPROVED
+  TASK_REJECTED
+  TASK_REVISION_REQUESTED
+  POINTS_AWARDED
+  POINTS_DEDUCTED
 }
 
 enum ActivityType {
