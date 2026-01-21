@@ -558,11 +558,11 @@ If you'd like to contribute to Merit Tracker Backend:
 
 ## License
 
-[Add your license information here]
+This project is licensed under the [MIT License](./LICENSE).
 
 ## Support
 
-For support and questions, please [add contact information or issue tracker link]
+For support and questions, (annsabbasi54@gmail.com)
 
 ---
 
